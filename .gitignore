@@ -1,0 +1,82 @@
+# Python: cache / bytecode
+**pycache**/
+*.py[cod]
+*$py.class
+
+# Python: packaging / build artifacts
+*.egg-info/
+.eggs/
+dist/
+build/
+wheels/
+pip-wheel-metadata/
+*.whl
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs
+logs/*.log
+*.log
+
+# ScoutBot runtime state / artifacts
+storage/db/**
+storage/runs/**
+storage/discovery/**
+storage/signals/**
+storage/interfaces/**
+storage/exports/**
+storage/backups/**
+storage/runtime/**
+
+!storage/db/.gitkeep
+!storage/runs/.gitkeep
+!storage/discovery/.gitkeep
+!storage/signals/.gitkeep
+!storage/interfaces/.gitkeep
+!storage/exports/.gitkeep
+!storage/backups/.gitkeep
+!storage/runtime/.gitkeep
+!logs/.gitkeep
+!.gitkeep
+
+# Local env secrets
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local notes / scratch files
+note.txt
+test.py
+.codex
+.codex/
+
+# Coverage / reports
+.coverage
+coverage.xml
+htmlcov/
+
+# MkDocs build output
+site/

@@ -1,0 +1,95 @@
+app:
+  name: "ScoutBot"
+  env: "dev"
+
+run:
+  mode: "routes"
+
+logging:
+  level: "INFO"
+  clear_logs: true
+  utc: true
+
+storage:
+  root: "storage"
+  db_path: "storage/db/scoutbot.sqlite3"
+
+telegram:
+  token_env: "TELEGRAM_BOT_TOKEN"
+  admin_ids_env: "TELEGRAM_ADMIN_IDS"
+  chat_id_env: "TELEGRAM_ALERT_CHAT_ID"
+
+changedetection:
+  base_url: "http://127.0.0.1:5000"
+  api_key_env: "CHANGEDETECTION_API_KEY"
+  timeout: 20
+  default_interval:
+    hours: 6
+  default_fetch_backend: "html_requests"
+  webhook_secret_env: "SCOUTBOT_WEBHOOK_SECRET"
+  webhook_url_env: "SCOUTBOT_WEBHOOK_URL"
+
+discovery:
+  enabled: true
+  auto_queue: true
+  target_links_max: 30
+  max_depth: 1
+  request_timeout: 10
+  max_response_bytes: 1000000
+  allowed_kinds:
+    - website
+    - blog
+    - docs
+    - changelog
+    - pricing
+    - careers
+    - rss
+    - github
+    - telegram
+    - social_profile
+    - link_aggregator
+  require_confirmation_kinds:
+    - social_profile
+  blocked_domains: []
+  allow_private_networks: false
+
+signals:
+  dedupe_enabled: true
+  body_excerpt_chars: 1000
+  categories:
+    delegation:
+      - delegation
+      - validator
+      - staking
+      - commission
+      - mainnet
+      - testnet
+      - governance
+      - restaking
+    product:
+      - feature
+      - integration
+      - api
+      - dashboard
+      - network
+      - chain
+    pricing:
+      - pricing
+      - price
+      - plan
+      - enterprise
+      - discount
+    hiring:
+      - careers
+      - jobs
+      - engineer
+      - devops
+      - sales
+      - bd
+
+ai:
+  enabled: false
+
+integrations:
+  n8n:
+    enabled: false
