@@ -19,8 +19,6 @@ STORAGE_DIR = ROOT_DIR / "storage"
 sys.path.insert(0, str(SRC_DIR))
 
 Handler = Callable[[dict, list[str]], int]
-
-# Константы
 SUPPORTED_COMMANDS = {
     "run",
     "doctor",
@@ -28,11 +26,12 @@ SUPPORTED_COMMANDS = {
     "import-seed",
     "export-seed",
     "sync",
+    "telegram",
+    "webhook",
     "routes",
 }
 
 
-# Хелпер: создание .env из .env.example, если .env отсутствует
 def _bootstrap_env_file_if_missing() -> None:
     env_path = ROOT_DIR / ".env"
     example_path = ROOT_DIR / ".env.example"
@@ -43,14 +42,12 @@ def _bootstrap_env_file_if_missing() -> None:
     print("[env] Please edit .env and set real secrets")
 
 
-# Хелпер: загрузка .env без перезаписи уже установленных переменных окружения
 def _load_env() -> None:
     env_path = ROOT_DIR / ".env"
     if env_path.exists():
         load_dotenv(env_path, override=False)
 
 
-# Хелпер: загрузка YAML и валидация настроек
 def _load_raw_settings(config_path: Path) -> dict:
     with config_path.open("r", encoding="utf-8") as f:
         payload = yaml.safe_load(f) or {}
@@ -59,14 +56,12 @@ def _load_raw_settings(config_path: Path) -> dict:
     return payload
 
 
-# Хелпер: загрузка и валидация настроек через модуль core.settings
 def _load_settings(config_path: Path) -> dict:
     from scoutbot_module.core.settings import load_settings
 
     return load_settings(config_path)
 
 
-# Конфигурирование логирования: stdout + logs/app.log
 def _setup_logging(settings: dict) -> None:
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -105,10 +100,8 @@ def _setup_logging(settings: dict) -> None:
         logging.Formatter.converter = _time.gmtime
 
 
-# Создание необходимых директорий для хранения данных
 def _prepare_dirs(settings: dict) -> None:
-    storage_cfg = settings.get("storage", {})
-    storage_root = Path(str(storage_cfg["root"]))
+    storage_root = Path(str(settings["storage"]["root"]))
 
     if not storage_root.is_absolute():
         storage_root = ROOT_DIR / storage_root
@@ -122,21 +115,12 @@ def _prepare_dirs(settings: dict) -> None:
     (storage_root / "exports").mkdir(parents=True, exist_ok=True)
 
 
-# Определение команды для запуска на основе аргументов CLI и настроек
 def _resolve_command(raw_command: str | None, settings: dict) -> str:
     command = raw_command or "run"
 
     if command == "run":
         run_cfg = settings["run"]
         command = str(run_cfg["mode"]).strip()
-
-    # Graceful "not implemented" for Iteration 0.
-    if command in ("telegram", "webhook"):
-        print(
-            f"Command {command!r} is not implemented in Iteration 0. "
-            f"It will be available in Iteration 1."
-        )
-        sys.exit(0)
 
     if command not in SUPPORTED_COMMANDS or command == "run":
         supported = ", ".join(sorted(SUPPORTED_COMMANDS - {"run"}))
@@ -147,7 +131,6 @@ def _resolve_command(raw_command: str | None, settings: dict) -> str:
     return command
 
 
-# Роутер для команды "routes"
 def _run_routes(settings: dict, argv: list[str]) -> int:
     """Display available CLI routes."""
     del settings, argv
@@ -157,11 +140,12 @@ def _run_routes(settings: dict, argv: list[str]) -> int:
     print("  ./start.sh import-seed config/seeds/noders.yml")
     print("  ./start.sh export-seed storage/exports/noders.export.yml")
     print("  ./start.sh sync")
+    print("  ./start.sh telegram")
+    print("  ./start.sh webhook")
     print("  ./start.sh routes")
     return 0
 
 
-# Роутер для команды "doctor" - базовая проверка окружения
 def _load_handler(command: str) -> Handler:
     if command == "routes":
         return _run_routes
@@ -191,10 +175,19 @@ def _load_handler(command: str) -> Handler:
 
         return run_sync
 
+    if command == "telegram":
+        from scoutbot_module.bot.app import run_telegram
+
+        return run_telegram
+
+    if command == "webhook":
+        from scoutbot_module.web.app import run_webhook
+
+        return run_webhook
+
     raise ValueError(f"Unsupported command: {command}")
 
 
-# Парсинг аргументов, загрузка настроек, роутинг команд
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="scoutbot",
@@ -206,7 +199,7 @@ def main() -> int:
         default=None,
         help=(
             "command: doctor, init-db, import-seed, export-seed, "
-            "sync, routes. "
+            "sync, telegram, webhook, routes. "
             "If omitted, uses run.mode from config/settings.yml."
         ),
     )

@@ -2,23 +2,31 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from typing import ClassVar
 
+from sqlalchemy.orm import declared_attr
 from sqlmodel import Column, Field, SQLModel, Text
 
 
-# SQLModel ORM модели для SQLite schema
 def _ts() -> datetime:
     return datetime.now(UTC)
 
 
-# ID generator для первичных ключей
 def _short_id(prefix: str = "") -> str:
     return f"{prefix}{uuid.uuid4().hex[:12]}"
 
 
-# Класс: Workspace, Project, Target, TargetLink, Watch, Signal, AuditLog
-class Workspace(SQLModel, table=True):
-    __tablename__ = "workspaces"  # type: ignore[reportIncompatibleVariableOverride]
+class _TableNameMixin:
+    _table_name: ClassVar[str]
+
+    @declared_attr.directive
+    def __tablename__(cls) -> str:
+        return cls._table_name
+
+
+class Workspace(_TableNameMixin, SQLModel, table=True):
+    _table_name: ClassVar[str] = "workspaces"
+
     workspace_id: str = Field(
         default_factory=lambda: _short_id("ws_"), primary_key=True
     )
@@ -28,9 +36,9 @@ class Workspace(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=_ts)
 
 
-# Класс: Project, Target, TargetLink, Watch, Signal, AuditLog
-class Project(SQLModel, table=True):
-    __tablename__ = "projects"  # type: ignore[reportIncompatibleVariableOverride]
+class Project(_TableNameMixin, SQLModel, table=True):
+    _table_name: ClassVar[str] = "projects"
+
     project_id: str = Field(
         default_factory=lambda: _short_id("proj_"), primary_key=True
     )
@@ -42,9 +50,9 @@ class Project(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=_ts)
 
 
-# Класс: Target, TargetLink, Watch, Signal, AuditLog
-class Target(SQLModel, table=True):
-    __tablename__ = "targets"  # type: ignore[reportIncompatibleVariableOverride]
+class Target(_TableNameMixin, SQLModel, table=True):
+    _table_name: ClassVar[str] = "targets"
+
     target_id: str = Field(default_factory=lambda: _short_id("tgt_"), primary_key=True)
     project_id: str | None = Field(
         default=None, foreign_key="projects.project_id", index=True
@@ -80,9 +88,9 @@ class Target(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=_ts)
 
 
-# Класс: TargetLink, Watch, Signal, AuditLog
-class TargetLink(SQLModel, table=True):
-    __tablename__ = "target_links"  # type: ignore[reportIncompatibleVariableOverride]
+class TargetLink(_TableNameMixin, SQLModel, table=True):
+    _table_name: ClassVar[str] = "target_links"
+
     link_id: str = Field(default_factory=lambda: _short_id("lnk_"), primary_key=True)
     source_target_id: str = Field(..., foreign_key="targets.target_id", index=True)
     target_id: str | None = Field(
@@ -98,9 +106,9 @@ class TargetLink(SQLModel, table=True):
     discovered_at: datetime = Field(default_factory=_ts)
 
 
-# Kласс: Watch, Signal, AuditLog
-class Watch(SQLModel, table=True):
-    __tablename__ = "watches"  # type: ignore[reportIncompatibleVariableOverride]
+class Watch(_TableNameMixin, SQLModel, table=True):
+    _table_name: ClassVar[str] = "watches"
+
     watch_id: str = Field(default_factory=lambda: _short_id("wch_"), primary_key=True)
     target_id: str = Field(..., foreign_key="targets.target_id", index=True)
     changedetection_uuid: str | None = Field(default=None, max_length=128)
@@ -111,9 +119,9 @@ class Watch(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=_ts)
 
 
-# Kласс: Signal, AuditLog
-class Signal(SQLModel, table=True):
-    __tablename__ = "signals"  # type: ignore[reportIncompatibleVariableOverride]
+class Signal(_TableNameMixin, SQLModel, table=True):
+    _table_name: ClassVar[str] = "signals"
+
     signal_id: str = Field(default_factory=lambda: _short_id("sig_"), primary_key=True)
     target_id: str | None = Field(
         default=None, foreign_key="targets.target_id", index=True
@@ -134,9 +142,9 @@ class Signal(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_ts)
 
 
-# Kласс: AuditLog
-class AuditLog(SQLModel, table=True):
-    __tablename__ = "audit_log"  # type: ignore[reportIncompatibleVariableOverride]
+class AuditLog(_TableNameMixin, SQLModel, table=True):
+    _table_name: ClassVar[str] = "audit_log"
+
     audit_id: str = Field(default_factory=lambda: _short_id("aud_"), primary_key=True)
     actor_telegram_id: str | None = Field(default=None, max_length=128)
     action: str = Field(..., max_length=128)

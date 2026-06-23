@@ -22,12 +22,10 @@ _SUPPORTED_MODES = frozenset(
 _SUPPORTED_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 
 
-# Настройки
 def _fail(msg: str) -> NoReturn:
     raise ValueError(msg)
 
 
-# Чекер для обязательных секций
 def _required_mapping(parent: dict[str, Any], key: str) -> dict[str, Any]:
     val = parent.get(key)
     if not isinstance(val, dict):
@@ -35,7 +33,6 @@ def _required_mapping(parent: dict[str, Any], key: str) -> dict[str, Any]:
     return val
 
 
-# Чекеры конкретных типов и значений
 def _check_positive_int(val: object, path: str) -> int:
     if type(val) is not int:
         _fail(f"{path}: expected int, got {type(val).__name__}")
@@ -44,7 +41,6 @@ def _check_positive_int(val: object, path: str) -> int:
     return val
 
 
-# Чекер для неотрицательных целых чисел
 def _check_nonnegative_int(val: object, path: str) -> int:
     if type(val) is not int:
         _fail(f"{path}: expected int, got {type(val).__name__}")
@@ -53,7 +49,6 @@ def _check_nonnegative_int(val: object, path: str) -> int:
     return val
 
 
-# Чекер для обязательных непустых строк
 def _check_required_string(val: object, path: str) -> str:
     if not isinstance(val, str):
         _fail(f"{path}: expected str, got {type(val).__name__}")
@@ -72,7 +67,6 @@ def _check_log_level(val: object, path: str) -> str:
     return level
 
 
-# Чекер для обязательных HTTP/HTTPS URL
 def _check_http_url(val: object, path: str) -> str:
     s = _check_required_string(val, path)
     parsed = urlparse(s)
@@ -83,7 +77,6 @@ def _check_http_url(val: object, path: str) -> str:
     return s
 
 
-# Валидация имени переменной окружения (env key name)
 def _check_env_key_name(val: object, path: str) -> str:
     s = _check_required_string(val, path)
     if not s.isidentifier():
@@ -91,14 +84,31 @@ def _check_env_key_name(val: object, path: str) -> str:
     return s
 
 
-# Чекер для булевых значений
 def _check_bool(val: object, path: str) -> bool:
     if type(val) is not bool:
         _fail(f"{path}: expected bool, got {type(val).__name__}")
     return val
 
 
-# Загрузка и валидация настроек из YAML
+def _check_string_list(val: object, path: str) -> list[str]:
+    if not isinstance(val, list):
+        _fail(f"{path}: expected list[str], got {type(val).__name__}")
+    result: list[str] = []
+    for index, item in enumerate(val):
+        result.append(_check_required_string(item, f"{path}[{index}]"))
+    return result
+
+
+def _check_categories_mapping(val: object, path: str) -> dict[str, list[str]]:
+    if not isinstance(val, dict):
+        _fail(f"{path}: expected mapping[str, list[str]]")
+    result: dict[str, list[str]] = {}
+    for key, item in val.items():
+        category_name = _check_required_string(key, f"{path}.<key>")
+        result[category_name] = _check_string_list(item, f"{path}.{category_name}")
+    return result
+
+
 def load_settings(config_path: Path) -> dict[str, Any]:
     if not config_path.exists():
         raise FileNotFoundError(f"Settings file not found: {config_path}")
@@ -132,10 +142,19 @@ def load_settings(config_path: Path) -> dict[str, Any]:
     _check_required_string(storage_.get("root"), "storage.root")
     _check_required_string(storage_.get("db_path"), "storage.db_path")
 
+    workspace_ = _required_mapping(cfg, "workspace")
+    _check_required_string(workspace_.get("default_name"), "workspace.default_name")
+
     telegram_ = _required_mapping(cfg, "telegram")
     _check_env_key_name(telegram_.get("token_env"), "telegram.token_env")
     _check_env_key_name(telegram_.get("admin_ids_env"), "telegram.admin_ids_env")
     _check_env_key_name(telegram_.get("chat_id_env"), "telegram.chat_id_env")
+
+    webhook_ = _required_mapping(cfg, "webhook")
+    _check_required_string(webhook_.get("host"), "webhook.host")
+    _check_positive_int(webhook_.get("port"), "webhook.port")
+    _check_required_string(webhook_.get("path"), "webhook.path")
+    _check_positive_int(webhook_.get("body_bytes_max"), "webhook.body_bytes_max")
 
     cd_ = _required_mapping(cfg, "changedetection")
     _check_http_url(cd_.get("base_url"), "changedetection.base_url")
@@ -170,6 +189,25 @@ def load_settings(config_path: Path) -> dict[str, Any]:
         discovery_.get("allow_private_networks"),
         "discovery.allow_private_networks",
     )
+    _check_string_list(discovery_.get("allowed_kinds"), "discovery.allowed_kinds")
+    _check_string_list(
+        discovery_.get("require_confirmation_kinds"),
+        "discovery.require_confirmation_kinds",
+    )
+    _check_string_list(discovery_.get("blocked_domains"), "discovery.blocked_domains")
+
+    signals_ = _required_mapping(cfg, "signals")
+    _check_bool(signals_.get("dedupe_enabled"), "signals.dedupe_enabled")
+    _check_positive_int(
+        signals_.get("body_excerpt_chars"), "signals.body_excerpt_chars"
+    )
+    categories_ = _check_categories_mapping(
+        signals_.get("categories"), "signals.categories"
+    )
+    for category_name in ("pricing", "delegation", "product"):
+        values = categories_.get(category_name)
+        if not values:
+            _fail(f"signals.categories.{category_name}: must be a non-empty list[str]")
 
     ai_ = _required_mapping(cfg, "ai")
     ai_enabled = ai_.get("enabled")

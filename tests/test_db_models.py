@@ -24,7 +24,6 @@ from scoutbot_module.db.repo import (
 from scoutbot_module.db.session import init_schema
 
 
-# Фикстура: сессия SQLite в памяти с инициализацией схемы v0
 @pytest.fixture
 def db_session() -> Iterator[Session]:
     engine = create_engine("sqlite://", echo=False)
@@ -34,7 +33,6 @@ def db_session() -> Iterator[Session]:
     session.close()
 
 
-# Создание минимального seed YAML для тестов
 def _make_seed(tmp_path: Path, name: str = "TestWorkspace") -> Path:
     data = {
         "workspace": {
@@ -69,7 +67,6 @@ def _make_seed(tmp_path: Path, name: str = "TestWorkspace") -> Path:
     return path
 
 
-# Получение текста ответа API (ограничение по размеру)
 def _write_seed_data(tmp_path: Path, data: dict | list, name: str = "seed.yml") -> Path:
     path = tmp_path / name
     with path.open("w", encoding="utf-8") as f:
@@ -77,7 +74,6 @@ def _write_seed_data(tmp_path: Path, data: dict | list, name: str = "seed.yml") 
     return path
 
 
-# Тест: init-db создает все ожидаемые таблицы
 def test_init_db_creates_expected_tables(db_session: Session) -> None:
     engine = db_session.get_bind()
     inspector = sa_inspect(engine)
@@ -126,7 +122,6 @@ def test_init_db_creates_expected_tables(db_session: Session) -> None:
     assert db_session.exec(select(AuditLog)).all()
 
 
-# Тест: импорт из seed YAML создает workspace, project, targets в SQLite
 def test_seed_import_creates_workspace_project_target(
     db_session: Session, tmp_path: Path
 ) -> None:
@@ -149,7 +144,6 @@ def test_seed_import_creates_workspace_project_target(
     assert targets[1].title == "Test Blog"
 
 
-# Тест: импорт нормализует внешние пробелы в строковых полях цели
 def test_seed_import_strips_target_strings(db_session: Session, tmp_path: Path) -> None:
     seed_path = _make_seed(tmp_path)
     data = yaml.safe_load(seed_path.read_text(encoding="utf-8"))
@@ -169,7 +163,6 @@ def test_seed_import_strips_target_strings(db_session: Session, tmp_path: Path) 
     assert target.fetch_backend == "html_requests"
 
 
-# Тест: импорт с недопустимым URL цели вызывает ValueError
 def test_seed_import_invalid_target_url_raises(
     db_session: Session, tmp_path: Path
 ) -> None:
@@ -182,7 +175,6 @@ def test_seed_import_invalid_target_url_raises(
         import_seed_yaml(db_session, seed_path)
 
 
-# Тест: импорт с отсутствующим URL цели вызывает ValueError
 def test_seed_import_missing_target_url_raises(
     db_session: Session, tmp_path: Path
 ) -> None:
@@ -195,7 +187,6 @@ def test_seed_import_missing_target_url_raises(
         import_seed_yaml(db_session, seed_path)
 
 
-# Тест: импорт с отрицательным интервалом цели вызывает ValueError
 def test_seed_import_project_item_not_mapping_raises(
     db_session: Session, tmp_path: Path
 ) -> None:
@@ -208,7 +199,6 @@ def test_seed_import_project_item_not_mapping_raises(
         import_seed_yaml(db_session, seed_path)
 
 
-# Тест: импорт с targets не в виде списка вызывает ValueError
 def test_seed_import_targets_not_list_raises(
     db_session: Session, tmp_path: Path
 ) -> None:
@@ -221,7 +211,6 @@ def test_seed_import_targets_not_list_raises(
         import_seed_yaml(db_session, seed_path)
 
 
-# Тест: импорт с пустым списком targets вызывает ValueError
 def test_seed_import_optional_valid_homepage_url_accepted(
     db_session: Session, tmp_path: Path
 ) -> None:
@@ -237,7 +226,6 @@ def test_seed_import_optional_valid_homepage_url_accepted(
     assert project.homepage_url == "http://example.com"
 
 
-# Тест: импорт с недопустимым homepage_url вызывает ValueError
 def test_seed_import_invalid_homepage_url_raises(
     db_session: Session, tmp_path: Path
 ) -> None:
@@ -250,7 +238,6 @@ def test_seed_import_invalid_homepage_url_raises(
         import_seed_yaml(db_session, seed_path)
 
 
-# Тест: импорт с tags не в виде списка вызывает ValueError
 def test_seed_import_project_tags_string_raises(
     db_session: Session, tmp_path: Path
 ) -> None:
@@ -263,7 +250,6 @@ def test_seed_import_project_tags_string_raises(
         import_seed_yaml(db_session, seed_path)
 
 
-# Тест: импорт с пустым списком targets вызывает ValueError
 def test_seed_import_empty_target_status_raises(
     db_session: Session, tmp_path: Path
 ) -> None:
@@ -276,7 +262,6 @@ def test_seed_import_empty_target_status_raises(
         import_seed_yaml(db_session, seed_path)
 
 
-# Тест: импорт с числовым fetch_backend цели вызывает ValueError
 def test_seed_import_numeric_target_fetch_backend_raises(
     db_session: Session, tmp_path: Path
 ) -> None:
@@ -292,7 +277,6 @@ def test_seed_import_numeric_target_fetch_backend_raises(
         import_seed_yaml(db_session, seed_path)
 
 
-# Тест: повторный импорт того же seed не создает дубликаты
 def test_seed_import_is_idempotent(db_session: Session, tmp_path: Path) -> None:
     seed_path = _make_seed(tmp_path)
     first_count = import_seed_yaml(db_session, seed_path)
@@ -310,7 +294,6 @@ def test_seed_import_is_idempotent(db_session: Session, tmp_path: Path) -> None:
     assert second_count == 0
 
 
-# Тест: импорт с другим именем workspace создает новый workspace
 def test_seed_import_creates_audit_log(db_session: Session, tmp_path: Path) -> None:
     seed_path = _make_seed(tmp_path)
     import_seed_yaml(db_session, seed_path)
@@ -320,7 +303,6 @@ def test_seed_import_creates_audit_log(db_session: Session, tmp_path: Path) -> N
     assert audit[0].action == "import_seed"
 
 
-# Тест: экспорт записывает YAML с данными workspace/project/target, без секретов
 def test_export_writes_yaml_without_secrets(
     db_session: Session, tmp_path: Path
 ) -> None:
@@ -344,7 +326,6 @@ def test_export_writes_yaml_without_secrets(
     assert "api_key" not in content.lower()
 
 
-# Тест: экспорт отражает текущее состояние SQLite, а не исходный seed
 def test_export_reads_targets_from_sqlite(db_session: Session, tmp_path: Path) -> None:
     seed_path = _make_seed(tmp_path)
     import_seed_yaml(db_session, seed_path)
@@ -368,7 +349,6 @@ def test_export_reads_targets_from_sqlite(db_session: Session, tmp_path: Path) -
     assert len(urls) == 3
 
 
-# Тест: экспорт несуществующего workspace вызывает ValueError
 def test_export_unknown_workspace_raises(db_session: Session, tmp_path: Path) -> None:
     output_path = tmp_path / "export.yml"
     with pytest.raises(ValueError, match="not found"):

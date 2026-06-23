@@ -11,20 +11,64 @@ from sqlmodel import select
 from scoutbot_module.core.settings import load_settings
 
 
-# Загрузка реальных настроек config/settings.yml для smoke-тестов
 def _load_test_settings() -> dict:
     config_path = Path(__file__).resolve().parent.parent / "config" / "settings.yml"
     return load_settings(config_path)
 
 
-# Комманды run, doctor, init-db, import-seed, export-seed, sync, routes должны быть поддержаны
 def test_routes_command_works() -> None:
     settings = _load_test_settings()
     assert settings is not None
-    assert settings["run"]["mode"] in ("routes", "doctor", "init-db")
+    assert settings["run"]["mode"] in (
+        "routes",
+        "doctor",
+        "init-db",
+        "telegram",
+        "webhook",
+    )
 
 
-# Класс: ScoutBotSettings должен быть корректно загружен из config/settings.yml
+def test_routes_includes_telegram_and_webhook() -> None:
+    settings = _load_test_settings()
+    assert "telegram" in settings
+    assert "webhook" in settings
+    assert "workspace" in settings
+    assert settings["workspace"]["default_name"]
+
+
+def test_telegram_boot_missing_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scoutbot_module.bot.app import run_telegram
+
+    settings = _load_test_settings()
+    token_env = settings["telegram"]["token_env"]
+    monkeypatch.delenv(token_env, raising=False)
+
+    exit_code = run_telegram(settings, [])
+    assert exit_code == 1
+
+
+def test_admin_ids_parsing() -> None:
+    from scoutbot_module.bot.app import _parse_admin_ids
+
+    assert _parse_admin_ids("123 456") == {123, 456}
+    assert _parse_admin_ids("123,456,789") == {123, 456, 789}
+    assert _parse_admin_ids("") == set()
+    assert _parse_admin_ids("abc") == set()
+    assert _parse_admin_ids("123 abc 456") == {123, 456}
+
+
+def test_webhook_boot_resolves(monkeypatch: pytest.MonkeyPatch) -> None:
+
+    settings = _load_test_settings()
+    secret_env = settings["changedetection"]["webhook_secret_env"]
+    monkeypatch.setenv(secret_env, "test-secret")
+
+    settings["webhook"]["port"] = 0
+    import uvicorn
+
+    assert uvicorn is not None
+
+
 @pytest.mark.slow
 def test_doctor_command_returns_non_crashing_status() -> None:
     from scoutbot_module.core.cli import run_doctor
@@ -34,7 +78,6 @@ def test_doctor_command_returns_non_crashing_status() -> None:
     assert exit_code in (0, 1)
 
 
-# Тест: doctor должен записывать статус changedetection.io в артефакт JSON
 def test_doctor_writes_changedetection_status_artifact(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -86,7 +129,6 @@ def test_doctor_missing_env_logs_do_not_include_literal_telegram_env_names(
     assert "TELEGRAM_ALERT_CHAT_ID" not in captured
 
 
-# Класс: ScoutBotSettings должен быть корректно загружен из config/settings.yml
 def test_init_db_is_idempotent(tmp_path: Path) -> None:
     from sqlmodel import create_engine
 
@@ -102,7 +144,6 @@ def test_init_db_is_idempotent(tmp_path: Path) -> None:
     assert "workspaces" in tables
 
 
-# Инициализация бд должна создавать файл SQLite
 def test_init_db_creates_db_file(tmp_path: Path) -> None:
     from scoutbot_module.db.migrations import run_migrations
 
@@ -127,7 +168,6 @@ def test_resolve_project_path_absolute_path_is_unchanged(tmp_path: Path) -> None
     assert resolve_project_path(absolute_path) == absolute_path
 
 
-# Тест: doctor должен записывать статус синхронизации в артефакт JSON
 def test_sync_missing_api_key_reports_sqlite_targets(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

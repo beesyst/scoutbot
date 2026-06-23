@@ -8,7 +8,6 @@ import yaml
 from scoutbot_module.core.settings import load_settings
 
 
-# Хелпер: запись валидного settings.yml с возможностью переопределения отдельных ключей
 def _write_settings(tmp_path: Path, overrides: dict | None = None) -> Path:
     base = {
         "app": {"name": "ScoutBot", "env": "test"},
@@ -22,10 +21,19 @@ def _write_settings(tmp_path: Path, overrides: dict | None = None) -> Path:
             "root": "storage",
             "db_path": "storage/db/scoutbot.sqlite3",
         },
+        "workspace": {
+            "default_name": "NODERS",
+        },
         "telegram": {
             "token_env": "TELEGRAM_BOT_TOKEN",
             "admin_ids_env": "TELEGRAM_ADMIN_IDS",
             "chat_id_env": "TELEGRAM_ALERT_CHAT_ID",
+        },
+        "webhook": {
+            "host": "127.0.0.1",
+            "port": 8000,
+            "path": "/webhooks/changedetection",
+            "body_bytes_max": 131072,
         },
         "changedetection": {
             "base_url": "http://127.0.0.1:5000",
@@ -43,7 +51,19 @@ def _write_settings(tmp_path: Path, overrides: dict | None = None) -> Path:
             "max_depth": 1,
             "request_timeout": 10,
             "max_response_bytes": 1000000,
+            "allowed_kinds": ["website", "blog"],
+            "require_confirmation_kinds": ["social_profile"],
+            "blocked_domains": [],
             "allow_private_networks": False,
+        },
+        "signals": {
+            "dedupe_enabled": True,
+            "body_excerpt_chars": 1000,
+            "categories": {
+                "pricing": ["pricing", "price"],
+                "delegation": ["delegation", "staking"],
+                "product": ["feature", "api"],
+            },
         },
         "ai": {"enabled": False},
         "integrations": {"n8n": {"enabled": False}},
@@ -56,21 +76,19 @@ def _write_settings(tmp_path: Path, overrides: dict | None = None) -> Path:
     return path
 
 
-# Хелпер: глубокое слияние словарей для удобства переопределения в тестах
 def _deep_merge(base: dict, overrides: dict) -> None:
     for key, value in overrides.items():
         if (
             key in base
             and isinstance(base[key], dict)
             and isinstance(value, dict)
-            and value  # non-empty dict → recurse
+            and value
         ):
             _deep_merge(base[key], value)
         else:
             base[key] = value
 
 
-# Тест: успешная загрузка валидного конфига
 def test_settings_load_ok(tmp_path: Path) -> None:
     path = _write_settings(tmp_path)
     cfg = load_settings(path)
@@ -84,30 +102,49 @@ def test_settings_load_ok(tmp_path: Path) -> None:
     assert "alert_chat_id_env" not in cfg["telegram"]
     assert cfg["discovery"]["target_links_max"] == 30
     assert "max_links_per_target" not in cfg["discovery"]
+    assert cfg["workspace"]["default_name"] == "NODERS"
+    assert cfg["webhook"]["host"] == "127.0.0.1"
+    assert cfg["webhook"]["port"] == 8000
+    assert cfg["webhook"]["path"] == "/webhooks/changedetection"
+    assert cfg["webhook"]["body_bytes_max"] == 131072
 
 
-# Тест: различные ошибки в конфиге должны приводить к ValueError с понятным сообщением
+def test_missing_workspace_default_name_fails(tmp_path: Path) -> None:
+    path = _write_settings(tmp_path, {"workspace": {"default_name": ""}})
+    with pytest.raises(ValueError, match="workspace.default_name"):
+        load_settings(path)
+
+
+def test_missing_webhook_host_fails(tmp_path: Path) -> None:
+    path = _write_settings(tmp_path, {"webhook": {}})
+    with pytest.raises(ValueError, match="webhook.host"):
+        load_settings(path)
+
+
+def test_webhook_port_zero_fails(tmp_path: Path) -> None:
+    path = _write_settings(tmp_path, {"webhook": {"port": 0}})
+    with pytest.raises(ValueError, match="webhook.port"):
+        load_settings(path)
+
+
 def test_missing_required_key_fails(tmp_path: Path) -> None:
     path = _write_settings(tmp_path, {"app": {"name": ""}})
     with pytest.raises(ValueError, match="app.name"):
         load_settings(path)
 
 
-# Тест: неправильный URL для changedetection должен вызывать ошибку
 def test_missing_app_name_fails(tmp_path: Path) -> None:
     path = _write_settings(tmp_path, {"app": {}})
     with pytest.raises(ValueError, match="app.name"):
         load_settings(path)
 
 
-# Тест: неправильный URL для changedetection должен вызывать ошибку
 def test_invalid_changedetection_url_fails(tmp_path: Path) -> None:
     path = _write_settings(tmp_path, {"changedetection": {"base_url": "not-a-url"}})
     with pytest.raises(ValueError, match="changedetection.base_url"):
         load_settings(path)
 
 
-# Тест: FTP URL для changedetection должен вызывать ошибку
 def test_invalid_changedetection_url_ftp_fails(tmp_path: Path) -> None:
     path = _write_settings(
         tmp_path, {"changedetection": {"base_url": "ftp://example.com"}}
@@ -116,35 +153,30 @@ def test_invalid_changedetection_url_ftp_fails(tmp_path: Path) -> None:
         load_settings(path)
 
 
-# Тест: отрицательный таймаут для changedetection должен вызывать ошибку
 def test_ai_enabled_false_baseline(tmp_path: Path) -> None:
     path = _write_settings(tmp_path)
     cfg = load_settings(path)
     assert cfg["ai"]["enabled"] is False
 
 
-# Тест: ai.enabled=true должен вызывать ошибку в MVP
 def test_ai_enabled_true_fails(tmp_path: Path) -> None:
     path = _write_settings(tmp_path, {"ai": {"enabled": True}})
     with pytest.raises(ValueError, match="ai.enabled"):
         load_settings(path)
 
 
-# Тест: integrations.n8n.enabled=false - это базовый кейс MVP
 def test_n8n_enabled_false_baseline(tmp_path: Path) -> None:
     path = _write_settings(tmp_path)
     cfg = load_settings(path)
     assert cfg["integrations"]["n8n"]["enabled"] is False
 
 
-# Тест: integrations.n8n.enabled=true должен вызывать ошибку в MVP
 def test_n8n_enabled_true_fails(tmp_path: Path) -> None:
     path = _write_settings(tmp_path, {"integrations": {"n8n": {"enabled": True}}})
     with pytest.raises(ValueError, match="integrations.n8n.enabled"):
         load_settings(path)
 
 
-# Тест: run.mode должен быть одним из allowed_modes
 def test_invalid_run_mode_fails(tmp_path: Path) -> None:
     path = _write_settings(tmp_path, {"run": {"mode": "invalid_mode"}})
     with pytest.raises(ValueError, match="run.mode"):
@@ -199,21 +231,18 @@ def test_invalid_logging_utc_string_fails(tmp_path: Path) -> None:
         load_settings(path)
 
 
-# Тест: отсутствующий storage.root должен вызывать ошибку
 def test_missing_storage_root_fails(tmp_path: Path) -> None:
     path = _write_settings(tmp_path, {"storage": {}})
     with pytest.raises(ValueError, match="storage.root"):
         load_settings(path)
 
 
-# Тест: отрицательное значение changedetecction.timeout вызывает ValueError
 def test_negative_timeout_fails(tmp_path: Path) -> None:
     path = _write_settings(tmp_path, {"changedetection": {"timeout": -1}})
     with pytest.raises(ValueError, match="changedetection.timeout"):
         load_settings(path)
 
 
-# Тест: неправильное имя переменной окружения для Telegram вызывает ошибку
 def test_missing_telegram_env_keys_fails(tmp_path: Path) -> None:
     path = _write_settings(tmp_path, {"telegram": {}})
     with pytest.raises(ValueError, match="telegram.token_env"):
@@ -234,6 +263,10 @@ def test_missing_telegram_env_keys_fails(tmp_path: Path) -> None:
         ("telegram", "token_env", "telegram.token_env"),
         ("telegram", "admin_ids_env", "telegram.admin_ids_env"),
         ("telegram", "chat_id_env", "telegram.chat_id_env"),
+        ("webhook", "host", "webhook.host"),
+        ("webhook", "port", "webhook.port"),
+        ("webhook", "path", "webhook.path"),
+        ("webhook", "body_bytes_max", "webhook.body_bytes_max"),
         ("changedetection", "base_url", "changedetection.base_url"),
         ("changedetection", "api_key_env", "changedetection.api_key_env"),
         ("changedetection", "timeout", "changedetection.timeout"),
@@ -250,7 +283,17 @@ def test_missing_telegram_env_keys_fails(tmp_path: Path) -> None:
         ("discovery", "max_depth", "discovery.max_depth"),
         ("discovery", "request_timeout", "discovery.request_timeout"),
         ("discovery", "max_response_bytes", "discovery.max_response_bytes"),
+        ("discovery", "allowed_kinds", "discovery.allowed_kinds"),
+        (
+            "discovery",
+            "require_confirmation_kinds",
+            "discovery.require_confirmation_kinds",
+        ),
+        ("discovery", "blocked_domains", "discovery.blocked_domains"),
         ("discovery", "allow_private_networks", "discovery.allow_private_networks"),
+        ("signals", "dedupe_enabled", "signals.dedupe_enabled"),
+        ("signals", "body_excerpt_chars", "signals.body_excerpt_chars"),
+        ("signals", "categories", "signals.categories"),
         ("ai", "enabled", "ai.enabled"),
     ],
 )
@@ -286,4 +329,14 @@ def test_missing_integrations_n8n_enabled_fails(tmp_path: Path) -> None:
     path.write_text(yaml.dump(data), encoding="utf-8")
 
     with pytest.raises(ValueError, match="integrations.n8n.enabled"):
+        load_settings(path)
+
+
+def test_missing_required_signal_category_fails(tmp_path: Path) -> None:
+    path = _write_settings(tmp_path)
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    del data["signals"]["categories"]["product"]
+    path.write_text(yaml.dump(data), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="signals.categories.product"):
         load_settings(path)

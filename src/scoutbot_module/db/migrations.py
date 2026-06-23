@@ -5,7 +5,6 @@ from pathlib import Path
 from scoutbot_module.db.session import create_db_engine, init_schema
 
 
-# Создание/обновление схемы до текущей версии (идемпотентно)
 def run_migrations(db_path: Path) -> None:
     engine = create_db_engine(db_path)
     init_schema(engine)

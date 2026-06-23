@@ -11,13 +11,19 @@ from sqlmodel import Session, col, select
 from scoutbot_module.db.models import (
     AuditLog,
     Project,
+    Signal,
     Target,
+    TargetLink,
     Watch,
     Workspace,
 )
 
 
-# Поиск или создание Workspace
+def get_workspace_by_name(session: Session, name: str) -> Workspace | None:
+    stmt = select(Workspace).where(Workspace.name == name)
+    return session.exec(stmt).first()
+
+
 def get_or_create_workspace(
     session: Session, name: str, description: str = ""
 ) -> Workspace:
@@ -32,12 +38,10 @@ def get_or_create_workspace(
     return ws
 
 
-# Список всех Workspaces
 def list_workspaces(session: Session) -> list[Workspace]:
     return list(session.exec(select(Workspace)).all())
 
 
-# Поиск или создание Project
 def get_or_create_project(
     session: Session,
     workspace_id: str,
@@ -65,7 +69,6 @@ def get_or_create_project(
     return proj
 
 
-# Список проектов по статусу
 def create_target(
     session: Session,
     project_id: str | None,
@@ -75,9 +78,11 @@ def create_target(
     priority: str = "medium",
     status: str = "queued",
     fetch_backend: str = "html_requests",
+    parent_target_id: str | None = None,
 ) -> Target:
     tgt = Target(
         project_id=project_id,
+        parent_target_id=parent_target_id,
         title=title,
         url=url,
         kind=kind,
@@ -91,7 +96,6 @@ def create_target(
     return tgt
 
 
-# Поиск или создание Target
 def get_or_create_target(
     session: Session,
     project_id: str | None,
@@ -131,13 +135,102 @@ def get_or_create_target(
     return tgt, True
 
 
-# Список целей по статусу
 def list_targets_by_status(session: Session, statuses: tuple[str, ...]) -> list[Target]:
     stmt = select(Target).where(col(Target.status).in_(statuses))
     return list(session.exec(stmt).all())
 
 
-# Поиск или создание Watch для цели
+def list_projects(session: Session, workspace_id: str) -> list[Project]:
+    stmt = select(Project).where(Project.workspace_id == workspace_id)
+    return list(session.exec(stmt).all())
+
+
+def list_targets(
+    session: Session, project_id: str | None = None, limit: int = 50
+) -> list[Target]:
+    stmt = select(Target)
+    if project_id is not None:
+        stmt = stmt.where(Target.project_id == project_id)
+    stmt = stmt.order_by(col(Target.updated_at).desc()).limit(limit)
+    return list(session.exec(stmt).all())
+
+
+def update_target_status(session: Session, target: Target, status: str) -> Target:
+    target.status = status
+    target.updated_at = datetime.now(UTC)
+    session.add(target)
+    session.commit()
+    session.refresh(target)
+    return target
+
+
+def create_target_link(
+    session: Session,
+    source_target_id: str,
+    url: str,
+    kind: str = "unknown",
+    relationship: str = "unknown",
+    confidence: float | None = None,
+    status: str = "discovered",
+    reason_code: str | None = None,
+) -> TargetLink:
+    link = TargetLink(
+        source_target_id=source_target_id,
+        url=url,
+        kind=kind,
+        relationship=relationship,
+        confidence=confidence,
+        status=status,
+        reason_code=reason_code,
+    )
+    session.add(link)
+    session.commit()
+    session.refresh(link)
+    return link
+
+
+def get_existing_target_link(
+    session: Session, source_target_id: str, url: str
+) -> TargetLink | None:
+    stmt = (
+        select(TargetLink)
+        .where(TargetLink.source_target_id == source_target_id)
+        .where(TargetLink.url == url)
+    )
+    return session.exec(stmt).first()
+
+
+def create_child_target_from_link(
+    session: Session,
+    link: TargetLink,
+    project_id: str | None,
+    kind: str = "website",
+    priority: str = "medium",
+    status: str = "queued",
+) -> Target:
+    tgt = create_target(
+        session=session,
+        project_id=project_id,
+        title=link.url,
+        url=link.url,
+        kind=kind,
+        priority=priority,
+        status=status,
+        parent_target_id=link.source_target_id,
+    )
+    link.target_id = tgt.target_id
+    link.status = "queued"
+    session.add(link)
+    session.commit()
+    session.refresh(link)
+    return tgt
+
+
+def find_watch_by_cd_uuid(session: Session, cd_uuid: str) -> Watch | None:
+    stmt = select(Watch).where(Watch.changedetection_uuid == cd_uuid)
+    return session.exec(stmt).first()
+
+
 def get_or_create_watch(session: Session, target_id: str) -> Watch:
     stmt = select(Watch).where(Watch.target_id == target_id)
     w = session.exec(stmt).first()
@@ -150,7 +243,11 @@ def get_or_create_watch(session: Session, target_id: str) -> Watch:
     return w
 
 
-# Обновление Watch с UUID от changedetection и активация
+def get_watch_by_target_id(session: Session, target_id: str) -> Watch | None:
+    stmt = select(Watch).where(Watch.target_id == target_id)
+    return session.exec(stmt).first()
+
+
 def update_watch_uuid(session: Session, watch: Watch, cd_uuid: str) -> Watch:
     watch.changedetection_uuid = cd_uuid
     watch.status = "active"
@@ -162,7 +259,6 @@ def update_watch_uuid(session: Session, watch: Watch, cd_uuid: str) -> Watch:
     return watch
 
 
-# Пометка Watch как синхронизационной ошибки
 def mark_watch_failed(session: Session, watch: Watch, error: str) -> Watch:
     watch.status = "sync_failed"
     watch.last_error = error
@@ -173,7 +269,61 @@ def mark_watch_failed(session: Session, watch: Watch, error: str) -> Watch:
     return watch
 
 
-# Запись события в AuditLog
+def mark_watch_removed_or_inactive(
+    session: Session, watch: Watch, status: str
+) -> Watch:
+    watch.changedetection_uuid = None
+    watch.status = status
+    watch.last_sync_at = datetime.now(UTC)
+    watch.last_error = None
+    session.add(watch)
+    session.commit()
+    session.refresh(watch)
+    return watch
+
+
+def create_signal(
+    session: Session,
+    target_id: str | None = None,
+    watch_id: str | None = None,
+    changedetection_uuid: str | None = None,
+    category: str | None = None,
+    priority: str | None = None,
+    diff_hash: str | None = None,
+    title: str | None = None,
+    summary: str | None = None,
+    raw_excerpt: str | None = None,
+    url: str | None = None,
+) -> Signal:
+    sig = Signal(
+        target_id=target_id,
+        watch_id=watch_id,
+        changedetection_uuid=changedetection_uuid,
+        category=category,
+        priority=priority,
+        diff_hash=diff_hash,
+        title=title,
+        summary=summary,
+        raw_excerpt=raw_excerpt,
+        url=url,
+    )
+    session.add(sig)
+    session.commit()
+    session.refresh(sig)
+    return sig
+
+
+def find_signal_by_target_and_hash(
+    session: Session, target_id: str, diff_hash: str
+) -> Signal | None:
+    stmt = (
+        select(Signal)
+        .where(Signal.target_id == target_id)
+        .where(Signal.diff_hash == diff_hash)
+    )
+    return session.exec(stmt).first()
+
+
 def write_audit_log(
     session: Session,
     action: str,
@@ -195,28 +345,24 @@ def write_audit_log(
     return entry
 
 
-# Проверка YAML mapping
 def _require_mapping(value: object, path: str) -> dict:
     if not isinstance(value, dict):
         raise ValueError(f"{path} must be a mapping")
     return value
 
 
-# Проверка YAML list
 def _require_list(value: object, path: str) -> list:
     if not isinstance(value, list):
         raise ValueError(f"{path} must be a list")
     return value
 
 
-# Обязательная непустая строка
 def _require_string(value: object, path: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{path} must be a non-empty string")
     return value.strip()
 
 
-# Optional непустая строка с default
 def _optional_string(value: object, default: str, path: str) -> str:
     if value is None:
         return default
@@ -225,7 +371,6 @@ def _optional_string(value: object, default: str, path: str) -> str:
     return value.strip()
 
 
-# Optional список строк
 def _optional_string_list(value: object, path: str) -> list[str] | None:
     if value is None:
         return None
@@ -237,7 +382,6 @@ def _optional_string_list(value: object, path: str) -> list[str] | None:
     return value
 
 
-# Валидация URL для передачи в changedetection.io
 def _validate_http_url(value: object, path: str) -> str:
     url = _require_string(value, path)
     parsed = urlparse(url)
@@ -246,7 +390,6 @@ def _validate_http_url(value: object, path: str) -> str:
     return url
 
 
-# Импорт из seed YAML
 def import_seed_yaml(session: Session, yaml_path: Path) -> int:
     with yaml_path.open("r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
@@ -316,7 +459,6 @@ def import_seed_yaml(session: Session, yaml_path: Path) -> int:
     return total
 
 
-# Экспорт в seed YAML
 def export_workspace_to_yaml(
     session: Session, workspace_name: str, output_path: Path
 ) -> Path:

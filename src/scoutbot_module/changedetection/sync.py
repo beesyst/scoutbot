@@ -6,6 +6,7 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from sqlmodel import Session
 
@@ -14,8 +15,10 @@ from scoutbot_module.changedetection.payloads import build_watch_payload
 from scoutbot_module.db.models import Target, Watch
 from scoutbot_module.db.repo import (
     get_or_create_watch,
+    get_watch_by_target_id,
     list_targets_by_status,
     mark_watch_failed,
+    mark_watch_removed_or_inactive,
     update_watch_uuid,
     write_audit_log,
 )
@@ -23,19 +26,16 @@ from scoutbot_module.db.repo import (
 LOG = logging.getLogger("scoutbot.changedetection.sync")
 
 
-# Синхронизация целей из SQLite в changedetection.io
 def _make_run_id() -> str:
     return f"run_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
 
 
-# Запись JSON-артефакта результата синхронизации
 def _write_json_artifact(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False, default=str)
 
 
-# Класс: SyncResult - результат одного запуска синхронизации
 class SyncResult:
     def __init__(self) -> None:
         self.run_id: str = _make_run_id()
@@ -62,7 +62,6 @@ class SyncResult:
         }
 
 
-# Синхронизация целей из SQLite в changedetection.io
 async def run_sync(
     settings: dict,
     db_session: Session,
@@ -73,12 +72,16 @@ async def run_sync(
     cd_cfg = settings["changedetection"]
     base_url: str = cd_cfg["base_url"]
     api_key_env: str = cd_cfg["api_key_env"]
+    webhook_url_env: str = cd_cfg["webhook_url_env"]
+    webhook_secret_env: str = cd_cfg["webhook_secret_env"]
     timeout: int = cd_cfg["timeout"]
     default_interval = cd_cfg["default_interval"]
     interval_hours: int = default_interval["hours"]
     default_fetch_backend: str = cd_cfg["default_fetch_backend"]
 
-    targets = list_targets_by_status(db_session, ("active", "queued"))
+    targets = list_targets_by_status(
+        db_session, ("active", "queued", "paused", "deleted")
+    )
     result.summary["total"] = len(targets)
 
     api_key: str | None = os.environ.get(api_key_env)
@@ -87,7 +90,63 @@ async def run_sync(
         result.reason_code = "api_key_missing"
         result.errors.append("changedetection API key missing")
         _write_artifact(result, storage_root)
-        _write_detail_artifact(result, storage_root, targets)
+        _write_detail_artifact(
+            result,
+            storage_root,
+            targets,
+            notification_configured=False,
+        )
+        _write_sync_audit_log(db_session, result)
+        return result
+
+    webhook_url = os.environ.get(webhook_url_env, "").strip()
+    if not webhook_url:
+        result.status = "degraded"
+        result.reason_code = "webhook_url_missing"
+        result.errors.append("changedetection webhook URL missing")
+        _write_artifact(result, storage_root)
+        _write_detail_artifact(
+            result,
+            storage_root,
+            targets,
+            notification_configured=False,
+        )
+        _write_sync_audit_log(db_session, result)
+        return result
+
+    webhook_secret = os.environ.get(webhook_secret_env, "").strip()
+    if not webhook_secret:
+        result.status = "degraded"
+        result.reason_code = "webhook_secret_missing"
+        result.errors.append("changedetection webhook secret missing")
+        _write_artifact(result, storage_root)
+        _write_detail_artifact(
+            result,
+            storage_root,
+            targets,
+            notification_configured=False,
+            notification_url=webhook_url,
+        )
+        _write_sync_audit_log(db_session, result)
+        return result
+
+    try:
+        authenticated_webhook_url = _build_authenticated_webhook_url(
+            webhook_url,
+            webhook_secret,
+        )
+    except ValueError:
+        result.status = "degraded"
+        result.reason_code = "webhook_url_invalid"
+        result.errors.append("changedetection webhook URL invalid")
+        _write_artifact(result, storage_root)
+        _write_detail_artifact(
+            result,
+            storage_root,
+            targets,
+            notification_configured=False,
+            notification_url=webhook_url,
+        )
         _write_sync_audit_log(db_session, result)
         return result
 
@@ -103,7 +162,13 @@ async def run_sync(
         result.reason_code = "changedetection_unreachable"
         result.errors.append(f"changedetection.io unreachable: {health_result.error}")
         _write_artifact(result, storage_root)
-        _write_detail_artifact(result, storage_root, targets)
+        _write_detail_artifact(
+            result,
+            storage_root,
+            targets,
+            notification_configured=True,
+            notification_url=authenticated_webhook_url,
+        )
         _write_sync_audit_log(db_session, result)
         await client.close()
         return result
@@ -112,6 +177,26 @@ async def run_sync(
 
     for tgt in targets:
         try:
+            if tgt.status in ("paused", "deleted"):
+                watch = get_watch_by_target_id(db_session, tgt.target_id)
+                if watch is None or not watch.changedetection_uuid:
+                    result.summary["skipped"] += 1
+                    continue
+
+                deleted = await client.delete_watch(watch.changedetection_uuid)
+                if deleted.ok:
+                    mark_watch_removed_or_inactive(db_session, watch, tgt.status)
+                    result.summary["updated"] += 1
+                else:
+                    result.summary["failed"] += 1
+                    _handle_failure(
+                        db_session,
+                        watch,
+                        result,
+                        deleted.error or "unknown changedetection error",
+                    )
+                continue
+
             watch = get_or_create_watch(db_session, tgt.target_id)
 
             interval_sec = interval_hours * 3600
@@ -120,6 +205,7 @@ async def run_sync(
                 title=tgt.title,
                 interval_seconds=interval_sec,
                 fetch_backend=tgt.fetch_backend or default_fetch_backend,
+                notification_urls=[authenticated_webhook_url],
             )
 
             if watch.changedetection_uuid:
@@ -168,14 +254,19 @@ async def run_sync(
         result.status = "partial"
 
     _write_artifact(result, storage_root)
-    _write_detail_artifact(result, storage_root, targets)
+    _write_detail_artifact(
+        result,
+        storage_root,
+        targets,
+        notification_configured=True,
+        notification_url=authenticated_webhook_url,
+    )
     _write_sync_audit_log(db_session, result)
 
     await client.close()
     return result
 
 
-# Извлечение UUID из ответа changedetection.io при создании watch
 def _extract_uuid(data: Any) -> str | None:
     if isinstance(data, dict):
         uuid = data.get("uuid") or (data.get("watch") or {}).get("uuid")
@@ -183,15 +274,12 @@ def _extract_uuid(data: Any) -> str | None:
             return str(uuid)
         return None
     if isinstance(data, str):
-        # raw string
         return data if data.strip() else None
     if isinstance(data, list) and data:
-        # list with first string/dict
         return _extract_uuid(data[0])
     return None
 
 
-# Обработка ошибки синхронизации для одного watch
 def _handle_failure(
     db_session: Session,
     watch: Watch,
@@ -202,24 +290,26 @@ def _handle_failure(
     result.errors.append(f"watch {watch.watch_id}: {error}")
 
 
-# Запись основного артефакта результата синхронизации
 def _write_artifact(result: SyncResult, storage_root: Path) -> None:
     path = storage_root / "interfaces" / "sync_result.json"
     _write_json_artifact(path, result.to_dict())
     LOG.info("Sync result written: %s", path)
 
 
-# Запись детального артефакта с информацией по каждому target
 def _write_detail_artifact(
     result: SyncResult,
     storage_root: Path,
     targets: list[Target],
+    notification_configured: bool,
+    notification_url: str | None = None,
 ) -> None:
     run_dir = storage_root / "runs" / result.run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
     detail = {
         "run_id": result.run_id,
+        "notification_configured": notification_configured,
+        "notification_url": _redact_url(notification_url),
         "targets": [
             {
                 "target_id": t.target_id,
@@ -233,6 +323,34 @@ def _write_detail_artifact(
     }
     path = run_dir / "target_sync.json"
     _write_json_artifact(path, detail)
+
+
+def _redact_url(url: str | None) -> str | None:
+    if not url:
+        return None
+    parts = urlsplit(url)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+
+
+def _build_authenticated_webhook_url(base_url: str, secret: str) -> str:
+    parts = urlsplit(base_url)
+    if parts.scheme not in ("http", "https", "json") or not parts.netloc:
+        raise ValueError("invalid_webhook_url")
+    query_pairs = [
+        (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if key != "secret"
+    ]
+    query_pairs.append(("secret", secret))
+    return urlunsplit(
+        (
+            parts.scheme,
+            parts.netloc,
+            parts.path,
+            urlencode(query_pairs, doseq=True),
+            parts.fragment,
+        )
+    )
 
 
 def _write_sync_audit_log(db_session: Session, result: SyncResult) -> None:

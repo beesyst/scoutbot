@@ -14,10 +14,19 @@ storage:
   root: "storage"
   db_path: "storage/db/scoutbot.sqlite3"
 
+workspace:
+  default_name: "NODERS"
+
 telegram:
   token_env: "TELEGRAM_BOT_TOKEN"
   admin_ids_env: "TELEGRAM_ADMIN_IDS"
   chat_id_env: "TELEGRAM_ALERT_CHAT_ID"
+
+webhook:
+  host: "127.0.0.1"
+  port: 8000
+  path: "/webhooks/changedetection"
+  body_bytes_max: 131072
 
 changedetection:
   base_url: "http://127.0.0.1:5000"

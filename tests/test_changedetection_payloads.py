@@ -1,14 +1,26 @@
 from __future__ import annotations
 
-import pytest
+import asyncio
+import json
+from pathlib import Path
 
+import pytest
+from sqlmodel import Session, create_engine
+
+from scoutbot_module.changedetection.client import CDResult
 from scoutbot_module.changedetection.payloads import (
     _interval_seconds_to_cd_interval,
     build_watch_payload,
 )
+from scoutbot_module.changedetection.sync import run_sync
+from scoutbot_module.db.repo import (
+    create_target,
+    get_or_create_watch,
+    update_watch_uuid,
+)
+from scoutbot_module.db.session import init_schema
 
 
-# Тест: helper конвертирует сек в объект интервала changedetection
 class TestIntervalSecondsToCdInterval:
     def test_days(self) -> None:
         assert _interval_seconds_to_cd_interval(86400) == {"days": 1}
@@ -34,7 +46,6 @@ class TestIntervalSecondsToCdInterval:
             _interval_seconds_to_cd_interval(-1)
 
 
-# Тест: пэйлоад содержит обязательные поля url, title, interval и fetch_backend
 def test_payload_has_required_fields() -> None:
     payload = build_watch_payload(
         url="https://example.com",
@@ -49,7 +60,6 @@ def test_payload_has_required_fields() -> None:
     assert payload["processor"] == "text_json_diff"
 
 
-# Тест: параметр fetch_backend равен html_requests
 def test_payload_default_fetch_backend() -> None:
     payload = build_watch_payload(
         url="https://example.com",
@@ -58,7 +68,6 @@ def test_payload_default_fetch_backend() -> None:
     assert payload["fetch_backend"] == "html_requests"
 
 
-# Тест: interval 30 секунд превращается в {"seconds": 30}
 def test_payload_interval_minimum() -> None:
     payload = build_watch_payload(
         url="https://example.com",
@@ -69,7 +78,6 @@ def test_payload_interval_minimum() -> None:
     assert payload["time_between_check_use_default"] is False
 
 
-# Тест: notification URLs фильтруются от пустых значений
 def test_notification_url_is_safe_in_artifacts() -> None:
     payload = build_watch_payload(
         url="https://example.com",
@@ -85,7 +93,6 @@ def test_notification_url_is_safe_in_artifacts() -> None:
     assert payload["notification_urls"][0] == "https://webhook.scoutbot.internal/hook"
 
 
-# Тест: notification URL с json:// сохраняется в пэйлоад
 def test_json_notification_url_is_preserved() -> None:
     payload = build_watch_payload(
         url="https://example.com",
@@ -98,7 +105,6 @@ def test_json_notification_url_is_preserved() -> None:
     ]
 
 
-# Тест: небезопасные заголовки не включаются в пэйлоад
 def test_secrets_not_serialized() -> None:
     payload = build_watch_payload(
         url="https://example.com",
@@ -116,7 +122,6 @@ def test_secrets_not_serialized() -> None:
     assert "Cookie" not in (payload.get("headers") or {})
 
 
-# Тест: CSS фильтр, xpath, ignore_text и trigger_text включаются в пэйлоад
 def test_payload_with_filters() -> None:
     payload = build_watch_payload(
         url="https://example.com",
@@ -132,7 +137,6 @@ def test_payload_with_filters() -> None:
     assert payload["trigger_text"] == ["delegation", "staking"]
 
 
-# Тест: пустой список notification_urls не включается в пэйлоад
 def test_empty_notification_urls_omitted() -> None:
     payload = build_watch_payload(
         url="https://example.com",
@@ -142,7 +146,6 @@ def test_empty_notification_urls_omitted() -> None:
     assert "notification_urls" not in payload
 
 
-# Тест: None в notification_urls не включается в пэйлоад
 def test_no_secrets_in_payload_repr() -> None:
     payload = build_watch_payload(
         url="https://example.com",
@@ -153,3 +156,247 @@ def test_no_secrets_in_payload_repr() -> None:
     assert "secret" not in text.lower()
     assert "token" not in text.lower()
     assert "api_key" not in text.lower()
+
+
+def _make_settings() -> dict:
+    return {
+        "changedetection": {
+            "base_url": "http://127.0.0.1:5000",
+            "api_key_env": "CHANGEDETECTION_API_KEY",
+            "webhook_url_env": "SCOUTBOT_WEBHOOK_URL",
+            "webhook_secret_env": "SCOUTBOT_WEBHOOK_SECRET",
+            "timeout": 20,
+            "default_interval": {"hours": 6},
+            "default_fetch_backend": "html_requests",
+        }
+    }
+
+
+def test_sync_degraded_when_webhook_url_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine = create_engine("sqlite://", echo=False)
+    init_schema(engine)
+    session = Session(engine)
+    try:
+        create_target(session, None, "Example", "https://example.com")
+        monkeypatch.setenv("CHANGEDETECTION_API_KEY", "test-api-key")
+        monkeypatch.delenv("SCOUTBOT_WEBHOOK_URL", raising=False)
+
+        result = asyncio.run(run_sync(_make_settings(), session, tmp_path))
+
+        assert result.status == "degraded"
+        assert result.reason_code == "webhook_url_missing"
+
+        detail_paths = list((tmp_path / "runs").glob("*/target_sync.json"))
+        assert len(detail_paths) == 1
+        detail = json.loads(detail_paths[0].read_text(encoding="utf-8"))
+        assert detail["notification_configured"] is False
+        assert detail["notification_url"] is None
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_sync_passes_notification_url_to_watch_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine = create_engine("sqlite://", echo=False)
+    init_schema(engine)
+    session = Session(engine)
+    captured: dict[str, object] = {}
+
+    class FakeClient:
+        def __init__(self, base_url: str, api_key: str, timeout: int) -> None:
+            del base_url, api_key, timeout
+
+        async def system_info(self) -> CDResult:
+            return CDResult.success({"version": "test"})
+
+        async def create_watch(self, payload: dict) -> CDResult:
+            captured["payload"] = payload
+            return CDResult.success({"uuid": "cd-uuid-1"})
+
+        async def close(self) -> None:
+            return None
+
+    def fake_build_watch_payload(**kwargs: object) -> dict[str, object]:
+        captured["notification_urls"] = kwargs.get("notification_urls")
+        return {"url": "https://example.com", "title": "Example"}
+
+    try:
+        create_target(session, None, "Example", "https://example.com")
+        monkeypatch.setenv("CHANGEDETECTION_API_KEY", "test-api-key")
+        monkeypatch.setenv(
+            "SCOUTBOT_WEBHOOK_URL",
+            "https://scoutbot.example/webhooks/changedetection",
+        )
+        monkeypatch.setenv("SCOUTBOT_WEBHOOK_SECRET", "super-secret")
+        monkeypatch.setattr(
+            "scoutbot_module.changedetection.sync.CDClient",
+            FakeClient,
+        )
+        monkeypatch.setattr(
+            "scoutbot_module.changedetection.sync.build_watch_payload",
+            fake_build_watch_payload,
+        )
+
+        result = asyncio.run(run_sync(_make_settings(), session, tmp_path))
+
+        assert result.status == "ok"
+        assert captured["notification_urls"] == [
+            "https://scoutbot.example/webhooks/changedetection?secret=super-secret"
+        ]
+
+        detail_paths = list((tmp_path / "runs").glob("*/target_sync.json"))
+        assert len(detail_paths) == 1
+        detail = json.loads(detail_paths[0].read_text(encoding="utf-8"))
+        assert detail["notification_configured"] is True
+        assert (
+            detail["notification_url"]
+            == "https://scoutbot.example/webhooks/changedetection"
+        )
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_sync_degraded_when_webhook_secret_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine = create_engine("sqlite://", echo=False)
+    init_schema(engine)
+    session = Session(engine)
+    try:
+        create_target(session, None, "Example", "https://example.com")
+        monkeypatch.setenv("CHANGEDETECTION_API_KEY", "test-api-key")
+        monkeypatch.setenv(
+            "SCOUTBOT_WEBHOOK_URL",
+            "https://scoutbot.example/webhooks/changedetection",
+        )
+        monkeypatch.delenv("SCOUTBOT_WEBHOOK_SECRET", raising=False)
+
+        result = asyncio.run(run_sync(_make_settings(), session, tmp_path))
+
+        assert result.status == "degraded"
+        assert result.reason_code == "webhook_secret_missing"
+
+        detail_paths = list((tmp_path / "runs").glob("*/target_sync.json"))
+        detail = json.loads(detail_paths[0].read_text(encoding="utf-8"))
+        assert detail["notification_configured"] is False
+        assert (
+            detail["notification_url"]
+            == "https://scoutbot.example/webhooks/changedetection"
+        )
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_sync_replaces_existing_secret_query(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine = create_engine("sqlite://", echo=False)
+    init_schema(engine)
+    session = Session(engine)
+    captured: dict[str, object] = {}
+
+    class FakeClient:
+        def __init__(self, base_url: str, api_key: str, timeout: int) -> None:
+            del base_url, api_key, timeout
+
+        async def system_info(self) -> CDResult:
+            return CDResult.success({"version": "test"})
+
+        async def create_watch(self, payload: dict) -> CDResult:
+            captured["payload"] = payload
+            return CDResult.success({"uuid": "cd-uuid-1"})
+
+        async def close(self) -> None:
+            return None
+
+    def fake_build_watch_payload(**kwargs: object) -> dict[str, object]:
+        captured["notification_urls"] = kwargs.get("notification_urls")
+        return {"url": "https://example.com", "title": "Example"}
+
+    try:
+        create_target(session, None, "Example", "https://example.com")
+        monkeypatch.setenv("CHANGEDETECTION_API_KEY", "test-api-key")
+        monkeypatch.setenv(
+            "SCOUTBOT_WEBHOOK_URL",
+            "https://scoutbot.example/webhooks/changedetection?secret=already-there",
+        )
+        monkeypatch.setenv("SCOUTBOT_WEBHOOK_SECRET", "fresh-secret")
+        monkeypatch.setattr(
+            "scoutbot_module.changedetection.sync.CDClient",
+            FakeClient,
+        )
+        monkeypatch.setattr(
+            "scoutbot_module.changedetection.sync.build_watch_payload",
+            fake_build_watch_payload,
+        )
+
+        result = asyncio.run(run_sync(_make_settings(), session, tmp_path))
+
+        assert result.status == "ok"
+        assert captured["notification_urls"] == [
+            "https://scoutbot.example/webhooks/changedetection?secret=fresh-secret"
+        ]
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_sync_removes_existing_watch_for_paused_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine = create_engine("sqlite://", echo=False)
+    init_schema(engine)
+    session = Session(engine)
+    captured: dict[str, object] = {}
+
+    class FakeClient:
+        def __init__(self, base_url: str, api_key: str, timeout: int) -> None:
+            del base_url, api_key, timeout
+
+        async def system_info(self) -> CDResult:
+            return CDResult.success({"version": "test"})
+
+        async def delete_watch(self, uuid: str) -> CDResult:
+            captured["deleted_uuid"] = uuid
+            return CDResult.success(status_code=204)
+
+        async def close(self) -> None:
+            return None
+
+    try:
+        target = create_target(
+            session,
+            None,
+            "Example",
+            "https://example.com",
+            status="paused",
+        )
+        watch = get_or_create_watch(session, target.target_id)
+        update_watch_uuid(session, watch, "cd-uuid-paused")
+        monkeypatch.setenv("CHANGEDETECTION_API_KEY", "test-api-key")
+        monkeypatch.setenv(
+            "SCOUTBOT_WEBHOOK_URL",
+            "https://scoutbot.example/webhooks/changedetection",
+        )
+        monkeypatch.setenv("SCOUTBOT_WEBHOOK_SECRET", "super-secret")
+        monkeypatch.setattr(
+            "scoutbot_module.changedetection.sync.CDClient",
+            FakeClient,
+        )
+
+        result = asyncio.run(run_sync(_make_settings(), session, tmp_path))
+
+        session.refresh(watch)
+        assert captured["deleted_uuid"] == "cd-uuid-paused"
+        assert watch.changedetection_uuid is None
+        assert watch.status == "paused"
+        assert result.status != "failed"
+    finally:
+        session.close()
+        engine.dispose()

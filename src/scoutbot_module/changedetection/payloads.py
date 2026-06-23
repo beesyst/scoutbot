@@ -4,7 +4,6 @@ from collections.abc import Sequence
 from typing import Any
 
 
-# Конвертация сек в объект интервала для API changedetection.io
 def _interval_seconds_to_cd_interval(interval_seconds: int) -> dict[str, int]:
     if interval_seconds <= 0:
         raise ValueError(f"interval_seconds must be positive, got {interval_seconds}")
@@ -17,7 +16,6 @@ def _interval_seconds_to_cd_interval(interval_seconds: int) -> dict[str, int]:
     return {"seconds": interval_seconds}
 
 
-# Payload билд для создания/обновления watch в changedetection.io
 def build_watch_payload(
     url: str,
     title: str,
@@ -77,7 +75,6 @@ def build_watch_payload(
     return payload
 
 
-# Чек безопасных заголовков (без секретов) для включения в payload
 def _is_safe_header(key: str) -> bool:
     lower = key.lower()
     blocked = {

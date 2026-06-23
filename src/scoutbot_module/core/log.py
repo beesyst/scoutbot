@@ -5,7 +5,6 @@ import time
 from pathlib import Path
 
 
-# Сетап логирования
 def setup_logging(
     logs_dir: Path,
     level: str = "INFO",

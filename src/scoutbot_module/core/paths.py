@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 
-# Поиск корневой директории проекта (где лежит pyproject.toml)
 def find_project_root(start_path: Path | None = None) -> Path:
     start = (start_path or Path(__file__).resolve()).resolve()
     for ancestor in [start] + list(start.parents):
@@ -25,7 +24,6 @@ def resolve_project_path(path: str | Path) -> Path:
     return p if p.is_absolute() else ROOT_DIR / p
 
 
-# Создание директории, если ее нет, и вернуть путь
 def ensure_dir(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     return path

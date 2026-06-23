@@ -6,17 +6,11 @@ from typing import Any
 import httpx
 
 LOG = logging.getLogger("scoutbot.changedetection.client")
-
-
-# Безопасный парсинг ответа: JSON если возможно, иначе bounded text.
 def _safe_parse_response(resp: httpx.Response) -> Any:
     try:
         return resp.json()
     except Exception:
         return resp.text[:1000]
-
-
-# Оборачивание результатов API в удобный класс
 class CDResult:
     def __init__(
         self,
@@ -41,9 +35,6 @@ class CDResult:
     @property
     def is_degraded(self) -> bool:
         return not self.ok
-
-
-# Класс: CDClient - тонкий HTTP-клиент для REST API changedetection.io
 class CDClient:
     def __init__(
         self,
