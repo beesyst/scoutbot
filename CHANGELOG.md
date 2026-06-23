@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/beesyst/scoutbot/compare/scoutbot-v0.1.0...scoutbot-v0.2.0) (2026-06-23)
+
+
+### Features
+
+* **telegram:** add ScoutBot MVP monitoring flow ([1c7f990](https://github.com/beesyst/scoutbot/commit/1c7f990eada7981a87f7f1d801d92a5f8a35f568))
+
 ## 0.1.0 (2026-06-22)
 
 
