@@ -6,6 +6,8 @@ from typing import Any
 def classify_signal(
     payload: dict[str, Any],
     categories: dict[str, list[str]],
+    priority_config: dict[str, list[str]] | None = None,
+    noise_ignore_text: list[str] | None = None,
 ) -> dict[str, Any]:
     text = _extract_text(payload)
     url = str(payload.get("url", "")).lower()
@@ -13,29 +15,50 @@ def classify_signal(
 
     combined = f"{title} {text} {url}".lower()
 
-    pricing_keywords = categories["pricing"]
-    if any(kw in combined for kw in pricing_keywords):
-        return {
-            "category": "pricing",
-            "priority": "high",
-            "title": title or "Pricing change",
-        }
+    matched_keywords: list[str] = []
+    reason_code: str = "unknown"
 
-    delegation_keywords = categories["delegation"]
-    if any(kw in combined for kw in delegation_keywords):
-        return {
-            "category": "delegation",
-            "priority": "high",
-            "title": title or "Delegation update",
-        }
+    if noise_ignore_text:
+        for phrase in noise_ignore_text:
+            if phrase.lower() in combined:
+                matched_keywords.append(phrase)
+        if matched_keywords:
+            return {
+                "category": "noise",
+                "priority": "low",
+                "matched_keywords": matched_keywords,
+                "reason_code": "noise_rule",
+                "title": title or "Noise",
+            }
 
-    product_keywords = categories["product"]
-    if any(kw in combined for kw in product_keywords):
-        return {
-            "category": "product",
-            "priority": "medium",
-            "title": title or "Product update",
-        }
+    category_order = [
+        "pricing",
+        "delegation",
+        "validator_network",
+        "product",
+        "positioning",
+        "hiring",
+        "legal",
+        "social",
+    ]
+
+    for cat in category_order:
+        keywords = categories.get(cat, [])
+        for kw in keywords:
+            if kw.lower() in combined:
+                matched_keywords.append(kw)
+        if matched_keywords:
+            priority = _resolve_priority(cat, priority_config)
+            reason_code = "keyword_match"
+            if cat == "social":
+                reason_code = "social_source"
+            return {
+                "category": cat,
+                "priority": priority,
+                "matched_keywords": matched_keywords,
+                "reason_code": reason_code,
+                "title": title or f"{cat.capitalize()} update",
+            }
 
     social_domains = [
         "t.me",
@@ -52,15 +75,30 @@ def classify_signal(
     if any(domain in url for domain in social_domains):
         return {
             "category": "social",
-            "priority": "medium",
+            "priority": _resolve_priority("social", priority_config),
+            "matched_keywords": [],
+            "reason_code": "social_source",
             "title": title or "Social update",
         }
 
     return {
         "category": "unknown",
         "priority": "low",
+        "matched_keywords": [],
+        "reason_code": "unknown",
         "title": title or "Change detected",
     }
+
+
+def _resolve_priority(
+    category: str, priority_config: dict[str, list[str]] | None
+) -> str:
+    if priority_config:
+        if category in priority_config.get("high_categories", []):
+            return "high"
+        if category in priority_config.get("medium_categories", []):
+            return "medium"
+    return "low"
 
 
 def _extract_text(payload: dict[str, Any]) -> str:

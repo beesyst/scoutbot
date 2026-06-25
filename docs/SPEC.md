@@ -425,21 +425,23 @@ storage:
 telegram:
   token_env: "TELEGRAM_BOT_TOKEN"
   admin_ids_env: "TELEGRAM_ADMIN_IDS"
+  allowed_user_ids_env: "TELEGRAM_ALLOWED_USER_IDS"
   chat_id_env: "TELEGRAM_ALERT_CHAT_ID"
 
 changedetection:
   base_url: "http://127.0.0.1:5000"
   api_key_env: "CHANGEDETECTION_API_KEY"
   timeout: 20
-  default_interval:
+  interval:
     hours: 6
-  default_fetch_backend: "html_requests"
+  fetch_backend: "html_requests"
   webhook_secret_env: "SCOUTBOT_WEBHOOK_SECRET"
   webhook_url_env: "SCOUTBOT_WEBHOOK_URL"
 
 discovery:
   enabled: true
   auto_queue: true
+  conf_min: 0.7
   target_links_max: 30
   max_depth: 1
   request_timeout: 10
@@ -510,7 +512,7 @@ Validation rules:
 - `run.mode` must be one of supported commands/modes;
 - `storage.root` required;
 - `storage.db_path` required;
-- `telegram.token_env`, `telegram.admin_ids_env`, `telegram.chat_id_env` required;
+- `telegram.token_env`, `telegram.admin_ids_env`, `telegram.allowed_user_ids_env`, `telegram.chat_id_env` required;
 - `changedetection.base_url` required HTTP/HTTPS URL;
 - `changedetection.api_key_env` required env key name;
 - `changedetection.timeout` must be positive;

@@ -16,6 +16,7 @@ _SUPPORTED_MODES = frozenset(
         "telegram",
         "webhook",
         "routes",
+        "digest",
     }
 )
 
@@ -148,6 +149,9 @@ def load_settings(config_path: Path) -> dict[str, Any]:
     telegram_ = _required_mapping(cfg, "telegram")
     _check_env_key_name(telegram_.get("token_env"), "telegram.token_env")
     _check_env_key_name(telegram_.get("admin_ids_env"), "telegram.admin_ids_env")
+    _check_env_key_name(
+        telegram_.get("allowed_user_ids_env"), "telegram.allowed_user_ids_env"
+    )
     _check_env_key_name(telegram_.get("chat_id_env"), "telegram.chat_id_env")
 
     webhook_ = _required_mapping(cfg, "webhook")
@@ -160,15 +164,11 @@ def load_settings(config_path: Path) -> dict[str, Any]:
     _check_http_url(cd_.get("base_url"), "changedetection.base_url")
     _check_env_key_name(cd_.get("api_key_env"), "changedetection.api_key_env")
     _check_positive_int(cd_.get("timeout"), "changedetection.timeout")
-    cd_interval_ = cd_.get("default_interval")
+    cd_interval_ = cd_.get("interval")
     if not isinstance(cd_interval_, dict):
-        _fail("changedetection.default_interval: must be a mapping")
-    _check_positive_int(
-        cd_interval_.get("hours"), "changedetection.default_interval.hours"
-    )
-    _check_required_string(
-        cd_.get("default_fetch_backend"), "changedetection.default_fetch_backend"
-    )
+        _fail("changedetection.interval: must be a mapping")
+    _check_positive_int(cd_interval_.get("hours"), "changedetection.interval.hours")
+    _check_required_string(cd_.get("fetch_backend"), "changedetection.fetch_backend")
     _check_env_key_name(
         cd_.get("webhook_secret_env"), "changedetection.webhook_secret_env"
     )
@@ -177,6 +177,11 @@ def load_settings(config_path: Path) -> dict[str, Any]:
     discovery_ = _required_mapping(cfg, "discovery")
     _check_bool(discovery_.get("enabled"), "discovery.enabled")
     _check_bool(discovery_.get("auto_queue"), "discovery.auto_queue")
+    conf_min = discovery_.get("conf_min")
+    if type(conf_min) is not float and type(conf_min) is not int:
+        _fail(f"discovery.conf_min: expected float, got {type(conf_min).__name__}")
+    if not (0.0 <= conf_min <= 1.0):
+        _fail(f"discovery.conf_min: must be between 0.0 and 1.0, got {conf_min}")
     _check_positive_int(
         discovery_.get("target_links_max"), "discovery.target_links_max"
     )
@@ -204,10 +209,33 @@ def load_settings(config_path: Path) -> dict[str, Any]:
     categories_ = _check_categories_mapping(
         signals_.get("categories"), "signals.categories"
     )
-    for category_name in ("pricing", "delegation", "product"):
+    for category_name in (
+        "pricing",
+        "delegation",
+        "validator_network",
+        "product",
+        "positioning",
+        "hiring",
+        "legal",
+        "social",
+        "noise",
+    ):
         values = categories_.get(category_name)
         if not values:
             _fail(f"signals.categories.{category_name}: must be a non-empty list[str]")
+    priority_val = signals_.get("priority")
+    if not isinstance(priority_val, dict):
+        _fail(
+            f"signals.priority: must be a mapping, "
+            f"got {type(priority_val).__name__} "
+            f"keys={list(signals_.keys())}"
+        )
+    _check_string_list(
+        priority_val.get("high_categories"), "signals.priority.high_categories"
+    )
+    _check_string_list(
+        priority_val.get("medium_categories"), "signals.priority.medium_categories"
+    )
 
     ai_ = _required_mapping(cfg, "ai")
     ai_enabled = ai_.get("enabled")

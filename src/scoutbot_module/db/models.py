@@ -154,3 +154,19 @@ class AuditLog(_TableNameMixin, SQLModel, table=True):
         default=None, sa_column=Column(Text, nullable=True)
     )
     created_at: datetime = Field(default_factory=_ts)
+
+
+class TelegramSubscriber(_TableNameMixin, SQLModel, table=True):
+    _table_name: ClassVar[str] = "telegram_subscribers"
+
+    subscriber_id: str = Field(
+        default_factory=lambda: _short_id("sub_"), primary_key=True
+    )
+    telegram_user_id: str = Field(..., max_length=128, index=True)
+    chat_id: str = Field(..., max_length=128, index=True)
+    username: str | None = Field(default=None, max_length=255)
+    first_name: str | None = Field(default=None, max_length=255)
+    role: str = Field(default="operator", max_length=32)
+    is_active: bool = Field(default=True)
+    created_at: datetime = Field(default_factory=_ts)
+    updated_at: datetime = Field(default_factory=_ts)

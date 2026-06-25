@@ -292,6 +292,7 @@ def test_auto_queued_child_target_keeps_parent_target_id(
     settings = {
         "discovery": {
             "auto_queue": True,
+            "conf_min": 0.7,
             "allowed_kinds": ["blog"],
             "require_confirmation_kinds": [],
         }

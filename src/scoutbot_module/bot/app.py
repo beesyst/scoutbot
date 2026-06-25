@@ -14,6 +14,7 @@ def run_telegram(settings: dict, argv: list[str]) -> int:
     telegram_cfg = settings["telegram"]
     token_env = telegram_cfg["token_env"]
     admin_ids_env = telegram_cfg["admin_ids_env"]
+    allowed_user_ids_env = telegram_cfg["allowed_user_ids_env"]
 
     token = os.environ.get(token_env)
     if not token:
@@ -24,21 +25,34 @@ def run_telegram(settings: dict, argv: list[str]) -> int:
         return 1
 
     admin_ids_raw = os.environ.get(admin_ids_env, "")
-    admin_ids = _parse_admin_ids(admin_ids_raw)
+    admin_ids = _parse_ids(admin_ids_raw)
+
+    allowed_raw = os.environ.get(allowed_user_ids_env, "")
+    allowed_ids = _parse_ids(allowed_raw)
+
+    effective_allowed = admin_ids | allowed_ids
 
     if not admin_ids:
         LOG.warning(
             "No admin IDs parsed from env. State-changing commands will be unavailable."
         )
 
-    LOG.info("Starting Telegram bot (admins=%d)", len(admin_ids))
+    LOG.info(
+        "Starting Telegram bot (admins=%d allowed=%d)",
+        len(admin_ids),
+        len(effective_allowed),
+    )
 
     db_path = resolve_project_path(settings["storage"]["db_path"])
 
     from scoutbot_module.bot.handlers import create_bot_app
 
     app = create_bot_app(
-        token=token, admin_ids=admin_ids, settings=settings, db_path=db_path
+        token=token,
+        admin_ids=admin_ids,
+        allowed_user_ids=effective_allowed,
+        settings=settings,
+        db_path=db_path,
     )
 
     LOG.info("Telegram bot polling started")
@@ -46,7 +60,7 @@ def run_telegram(settings: dict, argv: list[str]) -> int:
     return 0
 
 
-def _parse_admin_ids(raw: str) -> set[int]:
+def _parse_ids(raw: str) -> set[int]:
     ids: set[int] = set()
     for part in raw.replace(",", " ").split():
         part = part.strip()
@@ -55,5 +69,5 @@ def _parse_admin_ids(raw: str) -> set[int]:
         try:
             ids.add(int(part))
         except ValueError:
-            LOG.warning("Invalid admin ID: %r", part)
+            LOG.warning("Invalid ID: %r", part)
     return ids

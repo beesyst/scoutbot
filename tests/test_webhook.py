@@ -185,11 +185,14 @@ def test_async_alert_dispatch_is_awaited(
     captured: dict[str, object] = {}
 
     async def fake_send(
-        settings: dict, signal: dict, target_info: dict | None = None
+        settings: dict,
+        signal: dict,
+        target_info: dict | None = None,
+        db_path: str | None = None,
     ) -> dict:
         captured["signal"] = signal
         captured["target_info"] = target_info
-        return {"sent": True}
+        return {"sent": True, "sent_count": 1, "failed_count": 0, "recipients_total": 1}
 
     monkeypatch.setattr(
         "scoutbot_module.services.notifications.send_telegram_alert_async",

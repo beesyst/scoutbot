@@ -48,13 +48,13 @@ def test_telegram_boot_missing_token(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_admin_ids_parsing() -> None:
-    from scoutbot_module.bot.app import _parse_admin_ids
+    from scoutbot_module.bot.app import _parse_ids
 
-    assert _parse_admin_ids("123 456") == {123, 456}
-    assert _parse_admin_ids("123,456,789") == {123, 456, 789}
-    assert _parse_admin_ids("") == set()
-    assert _parse_admin_ids("abc") == set()
-    assert _parse_admin_ids("123 abc 456") == {123, 456}
+    assert _parse_ids("123 456") == {123, 456}
+    assert _parse_ids("123,456,789") == {123, 456, 789}
+    assert _parse_ids("") == set()
+    assert _parse_ids("abc") == set()
+    assert _parse_ids("123 abc 456") == {123, 456}
 
 
 def test_webhook_boot_resolves(monkeypatch: pytest.MonkeyPatch) -> None:

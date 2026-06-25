@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any, cast
 
 import httpx
@@ -14,10 +15,21 @@ from scoutbot_module.bot.formatters import (
     format_signal_alert,
     format_targets_list,
 )
-from scoutbot_module.bot.handlers import cmd_add, cmd_check
+from scoutbot_module.bot.handlers import (
+    cmd_add,
+    cmd_check,
+    cmd_delete,
+    cmd_pause,
+    cmd_projects,
+    cmd_resume,
+    cmd_subscribers,
+    cmd_targets,
+    handle_signal_action_callback,
+)
 from scoutbot_module.bot.keyboards import build_target_actions_keyboard
-from scoutbot_module.db.models import Target
+from scoutbot_module.db.models import AuditLog, Target
 from scoutbot_module.db.repo import (
+    create_signal,
     create_target,
 )
 from scoutbot_module.db.session import init_schema
@@ -40,13 +52,13 @@ def db_session() -> Iterator[Session]:
 
 
 def test_admin_ids_parsing() -> None:
-    from scoutbot_module.bot.app import _parse_admin_ids
+    from scoutbot_module.bot.app import _parse_ids
 
-    assert _parse_admin_ids("123 456") == {123, 456}
-    assert _parse_admin_ids("123,456,789") == {123, 456, 789}
-    assert _parse_admin_ids("") == set()
-    assert _parse_admin_ids("abc") == set()
-    assert _parse_admin_ids("123 abc 456") == {123, 456}
+    assert _parse_ids("123 456") == {123, 456}
+    assert _parse_ids("123,456,789") == {123, 456, 789}
+    assert _parse_ids("") == set()
+    assert _parse_ids("abc") == set()
+    assert _parse_ids("123 abc 456") == {123, 456}
 
 
 def test_add_target_saves_to_sqlite(db_session: Session) -> None:
@@ -198,7 +210,7 @@ def test_cmd_add_rejects_private_url_before_target_creation(
     class DummyContext:
         args = ["http://127.0.0.1/private"]
         bot_data = {
-            "admin_ids": {123},
+            "allowed_user_ids": {123},
             "settings": {
                 "workspace": {"default_name": "TEST"},
                 "discovery": {"allow_private_networks": False, "enabled": False},
@@ -259,7 +271,7 @@ def test_cmd_check_awaits_run_sync(
 
     class DummyContext:
         bot_data = {
-            "admin_ids": {123},
+            "allowed_user_ids": {123},
             "settings": {"storage": {"root": "storage"}},
             "db_path": "sqlite://",
         }
@@ -285,6 +297,119 @@ def test_cmd_check_awaits_run_sync(
     assert captured["db_session"] is not None
     assert replies
     assert "Sync: ok" in replies[0]
+
+
+@pytest.mark.parametrize(
+    ("handler", "reply_text"),
+    [
+        (cmd_projects, "Projects OK"),
+        (cmd_targets, "Targets OK"),
+    ],
+)
+def test_allowed_user_can_access_list_commands(
+    monkeypatch: pytest.MonkeyPatch,
+    handler: Any,
+    reply_text: str,
+) -> None:
+    replies: list[str] = []
+
+    class DummyMessage:
+        async def reply_text(self, text: str, **kwargs: object) -> None:
+            del kwargs
+            replies.append(text)
+
+    class DummyUser:
+        id = 123
+
+    class DummyUpdate:
+        effective_user = DummyUser()
+        effective_message = DummyMessage()
+
+    class DummySession:
+        def close(self) -> None:
+            return None
+
+    class DummyEngine:
+        def dispose(self) -> None:
+            return None
+
+    class DummyContext:
+        bot_data = {
+            "allowed_user_ids": {123},
+            "settings": {"workspace": {"default_name": "TEST"}},
+            "db_path": "sqlite://",
+        }
+
+    monkeypatch.setattr(
+        "scoutbot_module.bot.handlers.create_db_engine", lambda db_path: DummyEngine()
+    )
+    monkeypatch.setattr(
+        "scoutbot_module.bot.handlers.get_session", lambda engine: DummySession()
+    )
+    monkeypatch.setattr(
+        "scoutbot_module.services.targets.get_projects_list",
+        lambda session, workspace_name: [{"name": "Project A", "homepage_url": ""}],
+    )
+    monkeypatch.setattr(
+        "scoutbot_module.services.targets.get_targets_list",
+        lambda session, limit=20: [
+            {
+                "target_id": "tgt_1",
+                "title": "Example",
+                "url": "https://example.com",
+                "kind": "website",
+                "status": "active",
+            }
+        ],
+    )
+
+    asyncio.run(handler(cast(Any, DummyUpdate()), cast(Any, DummyContext())))
+
+    assert replies
+    assert "⛔" not in replies[0]
+
+
+@pytest.mark.parametrize(
+    ("handler", "args"),
+    [
+        (cmd_pause, ["tgt_1"]),
+        (cmd_resume, ["tgt_1"]),
+        (cmd_delete, ["tgt_1"]),
+        (cmd_subscribers, []),
+    ],
+)
+def test_non_admin_cannot_access_destructive_or_admin_commands(
+    handler: Any,
+    args: list[str],
+) -> None:
+    replies: list[str] = []
+
+    class DummyMessage:
+        async def reply_text(self, text: str, **kwargs: object) -> None:
+            del kwargs
+            replies.append(text)
+
+    class DummyUser:
+        id = 123
+
+    class DummyUpdate:
+        effective_user = DummyUser()
+        effective_message = DummyMessage()
+
+    class DummyContext:
+        def __init__(self, args: list[str]) -> None:
+            self.args = args
+            self.bot_data = {
+                "allowed_user_ids": {123},
+                "admin_ids": set(),
+                "db_path": "sqlite://",
+            }
+
+    context = DummyContext(args)
+
+    asyncio.run(handler(cast(Any, DummyUpdate()), cast(Any, context)))
+
+    assert replies == ["⛔ Admin only."]
 
 
 def test_send_telegram_alert_async_awaitable(
@@ -341,6 +466,10 @@ def test_send_telegram_alert_async_awaitable(
     payload = cast(Any, captured["json"])
     assert payload["chat_id"] == "chat"
     assert payload["text"]
+    assert (
+        payload["reply_markup"]["inline_keyboard"][0][0]["callback_data"]
+        == "signal:noise:sig-1"
+    )
     assert "parse_mode" not in payload
 
 
@@ -384,7 +513,7 @@ def test_cmd_add_reply_includes_inline_keyboard(
     class DummyContext:
         args = ["https://example.com"]
         bot_data = {
-            "admin_ids": {123},
+            "allowed_user_ids": {123},
             "settings": {
                 "workspace": {"default_name": "TEST"},
                 "discovery": {"allow_private_networks": True, "enabled": False},
@@ -454,7 +583,7 @@ def test_cmd_add_uses_async_discovery_without_to_thread(
     class DummyContext:
         args = ["https://example.com"]
         bot_data = {
-            "admin_ids": {123},
+            "allowed_user_ids": {123},
             "settings": {
                 "workspace": {"default_name": "TEST"},
                 "discovery": {"allow_private_networks": True, "enabled": True},
@@ -503,3 +632,83 @@ def test_cmd_add_uses_async_discovery_without_to_thread(
     asyncio.run(cmd_add(cast(Any, DummyUpdate()), cast(Any, DummyContext())))
 
     assert captured["session"] is not None
+
+
+def test_handle_signal_action_callback_marks_exact_signal_as_noise(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "test.sqlite3"
+    engine = create_engine(f"sqlite:///{db_path}", echo=False)
+    init_schema(engine)
+    session = Session(engine)
+    try:
+        target = create_target(session, None, "Example", "https://example.com")
+        older = create_signal(
+            session,
+            target_id=target.target_id,
+            category="product",
+            priority="medium",
+            title="Older",
+        )
+        newer = create_signal(
+            session,
+            target_id=target.target_id,
+            category="pricing",
+            priority="high",
+            title="Newer",
+        )
+        replies: list[str] = []
+
+        class DummyQuery:
+            data = f"signal:noise:{older.signal_id}"
+            message = None
+
+            async def answer(self) -> None:
+                return None
+
+            async def edit_message_text(self, text: str, **kwargs: object) -> None:
+                del kwargs
+                replies.append(text)
+
+        class DummyUser:
+            id = 123
+
+        class DummyUpdate:
+            effective_user = DummyUser()
+            callback_query = DummyQuery()
+
+        class DummyContext:
+            bot_data = {
+                "allowed_user_ids": {123},
+                "db_path": db_path,
+                "settings": {"storage": {"root": str(tmp_path / "storage")}},
+            }
+
+        asyncio.run(
+            handle_signal_action_callback(
+                cast(Any, DummyUpdate()),
+                cast(Any, DummyContext()),
+            )
+        )
+
+        session.refresh(older)
+        session.refresh(newer)
+        session.refresh(target)
+
+        assert older.category == "noise"
+        assert older.priority == "low"
+        assert newer.category == "pricing"
+        assert newer.priority == "high"
+        assert older.signal_id in (target.ignore_text_json or "")
+
+        audit = session.exec(
+            select(AuditLog).where(AuditLog.entity_id == older.signal_id)
+        ).all()
+        assert any(item.action == "mark_as_noise" for item in audit)
+        noise_files = list((tmp_path / "storage" / "runs").glob("*/noise_update.json"))
+        assert len(noise_files) == 1
+        assert replies
+        assert "Marked as noise" in replies[0]
+    finally:
+        session.close()
+        engine.dispose()

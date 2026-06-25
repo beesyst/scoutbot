@@ -57,6 +57,8 @@ At minimum, the project should protect:
 - SQLite state;
 - changedetection watch configuration;
 - Telegram admin allowlist;
+- Telegram allowed user list;
+- Telegram subscriber data;
 - source graph and signal artifacts;
 - operator/private monitoring lists;
 - dependency integrity.
@@ -290,7 +292,33 @@ Degraded statuses should be explicit, for example:
 - `parse_error`;
 - `fetch_error`.
 
-### 12. Telegram admin boundary
+### 12. Telegram access boundary
+
+Telegram bot supports two roles:
+
+- **admin** — полный доступ: `/add`, `/pause`, `/resume`, `/delete`, `/check`, `/subscribers`, `/projects`, `/targets`.
+- **allowed user (operator)** — может подписаться на алерты и просматривать свой статус: `/start`, `/help`, `/subscribe`, `/unsubscribe`, `/me`, `/add`, `/projects`, `/targets`, `/check`.
+
+`TELEGRAM_ADMIN_IDS` задаёт полный доступ.
+`TELEGRAM_ALLOWED_USER_IDS` задаёт allowed operators/viewers.
+Effective allowed = admins ∪ allowed ids.
+Неавторизованные пользователи получают `⛔ Access denied.`
+
+Subscribers хранятся в SQLite (`telegram_subscribers`) — runtime state.
+Allowed users — env/config, не SQLite.
+`TELEGRAM_ALERT_CHAT_ID` — optional global/group alert sink, не источник подписчиков.
+
+### 13. Telegram token must not appear in logs
+
+Telegram Bot API calls produce `https://api.telegram.org/bot<TOKEN>/...` URLs.
+These URLs must not appear in runtime logs, storage artifacts, or test output.
+
+Mitigation:
+
+- `httpx`, `httpcore`, `telegram.httpx` loggers set to WARNING level.
+- Security check: `rg -n -i "api.telegram.org/bot" logs storage` — expected: empty.
+
+### 14. Telegram admin boundary
 
 Only allowed Telegram admins can mutate state.
 
@@ -312,7 +340,7 @@ State-changing commands include at minimum:
 - import/export;
 - manual sync.
 
-### 13. Webhook boundary
+### 15. Webhook boundary
 
 Changedetection webhook receiver must:
 
@@ -327,7 +355,7 @@ Changedetection webhook receiver must:
 
 Webhook failures should be explicit, but error responses must not expose secrets or internal paths unnecessarily.
 
-### 14. changedetection API boundary
+### 16. changedetection API boundary
 
 ScoutBot controls `changedetection.io` only through REST API.
 
@@ -344,7 +372,7 @@ Rules:
 - changedetection unavailable state must be visible as degraded/error, not silent success;
 - duplicate watches must not be created accidentally.
 
-### 15. Network-facing routes
+### 17. Network-facing routes
 
 Any FastAPI/webhook route is security-sensitive by default.
 

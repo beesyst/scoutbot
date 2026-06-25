@@ -75,9 +75,9 @@ async def run_sync(
     webhook_url_env: str = cd_cfg["webhook_url_env"]
     webhook_secret_env: str = cd_cfg["webhook_secret_env"]
     timeout: int = cd_cfg["timeout"]
-    default_interval = cd_cfg["default_interval"]
-    interval_hours: int = default_interval["hours"]
-    default_fetch_backend: str = cd_cfg["default_fetch_backend"]
+    interval = cd_cfg["interval"]
+    interval_hours: int = interval["hours"]
+    fetch_backend: str = cd_cfg["fetch_backend"]
 
     targets = list_targets_by_status(
         db_session, ("active", "queued", "paused", "deleted")
@@ -200,12 +200,25 @@ async def run_sync(
             watch = get_or_create_watch(db_session, tgt.target_id)
 
             interval_sec = interval_hours * 3600
+
+            ignore_text_list: list[str] = []
+            if tgt.ignore_text_json:
+                try:
+                    parsed = json.loads(tgt.ignore_text_json)
+                    if isinstance(parsed, list):
+                        ignore_text_list = [
+                            str(i) for i in parsed if isinstance(i, str) and i.strip()
+                        ]
+                except json.JSONDecodeError, TypeError:
+                    pass
+
             payload = build_watch_payload(
                 url=tgt.url,
                 title=tgt.title,
                 interval_seconds=interval_sec,
-                fetch_backend=tgt.fetch_backend or default_fetch_backend,
+                fetch_backend=tgt.fetch_backend or fetch_backend,
                 notification_urls=[authenticated_webhook_url],
+                ignore_text=ignore_text_list or None,
             )
 
             if watch.changedetection_uuid:

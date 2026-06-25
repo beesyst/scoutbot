@@ -38,6 +38,10 @@ def setup_logging(
     if utc:
         logging.Formatter.converter = time.gmtime
 
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("telegram.httpx").setLevel(logging.WARNING)
+
     logging.getLogger("scoutbot").info(
         "Logging configured: level=%s utc=%s file=%s",
         level,

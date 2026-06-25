@@ -180,6 +180,7 @@ async def _dispatch_alert(
         settings=settings,
         signal=signal,
         target_info=target_info,
+        db_path=db_path,
     )
 
 

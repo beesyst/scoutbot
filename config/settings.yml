@@ -20,6 +20,7 @@ workspace:
 telegram:
   token_env: "TELEGRAM_BOT_TOKEN"
   admin_ids_env: "TELEGRAM_ADMIN_IDS"
+  allowed_user_ids_env: "TELEGRAM_ALLOWED_USER_IDS"
   chat_id_env: "TELEGRAM_ALERT_CHAT_ID"
 
 webhook:
@@ -32,15 +33,16 @@ changedetection:
   base_url: "http://127.0.0.1:5000"
   api_key_env: "CHANGEDETECTION_API_KEY"
   timeout: 20
-  default_interval:
+  interval:
     hours: 6
-  default_fetch_backend: "html_requests"
+  fetch_backend: "html_requests"
   webhook_secret_env: "SCOUTBOT_WEBHOOK_SECRET"
   webhook_url_env: "SCOUTBOT_WEBHOOK_URL"
 
 discovery:
   enabled: true
   auto_queue: true
+  conf_min: 0.7
   target_links_max: 30
   max_depth: 1
   request_timeout: 10
@@ -63,9 +65,23 @@ discovery:
   allow_private_networks: false
 
 signals:
+  profile: "noders"
   dedupe_enabled: true
   body_excerpt_chars: 1000
   categories:
+    pricing:
+      - pricing
+      - price
+      - plan
+      - enterprise
+      - discount
+    product:
+      - feature
+      - integration
+      - api
+      - dashboard
+      - network
+      - chain
     delegation:
       - delegation
       - validator
@@ -75,19 +91,18 @@ signals:
       - testnet
       - governance
       - restaking
-    product:
-      - feature
-      - integration
-      - api
-      - dashboard
+    validator_network:
+      - validator
       - network
-      - chain
-    pricing:
-      - pricing
-      - price
-      - plan
-      - enterprise
-      - discount
+      - node
+      - infrastructure
+      - protocol
+    positioning:
+      - positioning
+      - roadmap
+      - vision
+      - strategy
+      - partnership
     hiring:
       - careers
       - jobs
@@ -95,6 +110,51 @@ signals:
       - devops
       - sales
       - bd
+    legal:
+      - privacy
+      - terms
+      - compliance
+      - regulation
+      - legal
+    social:
+      - announcement
+      - community
+      - event
+      - meetup
+      - webinar
+    noise:
+      - "©"
+      - "All rights reserved"
+      - "Accept cookies"
+      - "Subscribe"
+  priority:
+    high_categories:
+      - pricing
+      - delegation
+      - validator_network
+    medium_categories:
+      - product
+      - positioning
+      - hiring
+      - legal
+      - social
+  noise:
+    ignore_text:
+      - "©"
+      - "All rights reserved"
+      - "Accept cookies"
+      - "Subscribe"
+    ignore_selectors:
+      - "nav"
+      - "footer"
+      - ".cookie"
+      - ".cookies"
+      - ".banner"
+      - ".newsletter"
+      - ".subscribe"
+      - ".chat"
+      - "script"
+      - "style"
 
 ai:
   enabled: false

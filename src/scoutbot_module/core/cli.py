@@ -8,7 +8,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlmodel import Session
+from sqlmodel import Session, col
 
 from scoutbot_module.core.paths import resolve_project_path
 from scoutbot_module.db.migrations import run_migrations
@@ -240,3 +240,163 @@ async def run_sync_async(settings: dict, session: Session, storage_root: Path):
     from scoutbot_module.changedetection.sync import run_sync
 
     return await run_sync(settings, session, storage_root)
+
+
+def run_digest(settings: dict, argv: list[str]) -> int:
+    logger = logging.getLogger("scoutbot.digest")
+
+    date_str: str | None = None
+    if argv:
+        date_str = argv[0].strip()
+
+    db_path = resolve_project_path(settings["storage"]["db_path"])
+    storage_root = resolve_project_path(settings["storage"]["root"])
+
+    engine = create_db_engine(db_path)
+    session = get_session(engine)
+    try:
+        result = asyncio.run(
+            _run_digest_async(settings, session, storage_root, date_str, str(db_path))
+        )
+        logger.info(
+            "Digest: groups=%d sent=%d failed=%d",
+            len(result.get("groups", [])),
+            result.get("delivery", {}).get("sent_count", 0),
+            result.get("delivery", {}).get("failed_count", 0),
+        )
+        return 0
+    finally:
+        session.close()
+        engine.dispose()
+
+
+async def _run_digest_async(
+    settings: dict,
+    session: Session,
+    storage_root: Path,
+    date_str: str | None = None,
+    db_path_str: str | None = None,
+) -> dict:
+    from datetime import UTC, datetime, timedelta
+
+    from sqlmodel import select
+
+    from scoutbot_module.db.models import Project, Signal, Target
+
+    if date_str:
+        try:
+            target_date = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=UTC)
+        except ValueError:
+            target_date = datetime.now(UTC).date()
+            if isinstance(target_date, datetime):
+                target_date = target_date.date()
+    else:
+        target_date = datetime.now(UTC).date()
+
+    day_start = datetime.combine(target_date, datetime.min.time(), tzinfo=UTC)
+    day_end = day_start + timedelta(days=1)
+
+    stmt = (
+        select(Signal)
+        .where(col(Signal.detected_at) >= day_start)
+        .where(col(Signal.detected_at) < day_end)
+        .order_by(col(Signal.detected_at))
+    )
+    signals = session.exec(stmt).all()
+
+    groups: list[dict] = []
+    groups_key: dict[tuple, dict] = {}
+
+    for sig in signals:
+        target_id = sig.target_id
+        project_name = "Unknown"
+        if target_id:
+            tgt = session.exec(
+                select(Target).where(Target.target_id == target_id)
+            ).first()
+            if tgt and tgt.project_id:
+                proj = session.exec(
+                    select(Project).where(Project.project_id == tgt.project_id)
+                ).first()
+                if proj:
+                    project_name = proj.name
+
+        category = sig.category or "unknown"
+        priority = sig.priority or "low"
+        key = (project_name, category, priority)
+
+        signal_entry = {
+            "signal_id": sig.signal_id,
+            "title": sig.title or "Change detected",
+            "url": sig.url or "",
+        }
+
+        if key in groups_key:
+            groups_key[key]["signals"].append(signal_entry)
+        else:
+            entry = {
+                "project": project_name,
+                "category": category,
+                "priority": priority,
+                "signals": [signal_entry],
+            }
+            groups_key[key] = entry
+            groups.append(entry)
+
+    run_id = f"run_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
+    digest_path = storage_root / "runs" / run_id / "digest.json"
+    digest_path.parent.mkdir(parents=True, exist_ok=True)
+
+    delivery_result = {"sent_count": 0, "failed_count": 0, "skipped_count": 0}
+
+    if groups:
+        from scoutbot_module.services.notifications import (
+            send_telegram_alert_async,
+        )
+
+        summary_lines = [
+            f"ScoutBot digest — {target_date.isoformat()}",
+            "",
+        ]
+        for g in groups:
+            summary_lines.append(
+                f"{g['project']} / {g['category']} [{g['priority']}]: {len(g['signals'])} signal(s)"
+            )
+
+        summary_text = "\n".join(summary_lines)
+
+        delivery_result = await send_telegram_alert_async(
+            settings=settings,
+            signal={
+                "signal_id": f"digest_{run_id}",
+                "category": "digest",
+                "priority": "medium",
+                "title": f"Daily digest {target_date.isoformat()}",
+                "summary": summary_text,
+                "url": "",
+            },
+            target_info=None,
+            db_path=db_path_str,
+        )
+
+    payload = {
+        "run_id": run_id,
+        "date": target_date.isoformat(),
+        "groups": groups,
+        "delivery": delivery_result,
+    }
+
+    with digest_path.open("w", encoding="utf-8") as f:
+        import json
+
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+
+    LOG.info(
+        "Digest written: %s (groups=%d sent=%d failed=%d)",
+        digest_path,
+        len(groups),
+        delivery_result.get("sent_count", 0),
+        delivery_result.get("failed_count", 0),
+    )
+
+    return payload

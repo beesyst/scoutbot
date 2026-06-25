@@ -319,6 +319,7 @@ uv run --frozen --extra dev python config/start.py init-db
 uv run --frozen --extra dev python config/start.py sync
 uv run --frozen --extra dev python config/start.py telegram
 uv run --frozen --extra dev python config/start.py webhook
+uv run --frozen --extra dev python config/start.py digest
 ```
 
 В обычной разработке предпочтительный entrypoint — `./start.sh`.
@@ -841,15 +842,16 @@ changedetection:
   base_url: "http://127.0.0.1:5000"
   api_key_env: "CHANGEDETECTION_API_KEY"
   timeout: 20
-  default_interval:
+  interval:
     hours: 6
-  default_fetch_backend: "html_requests"
+  fetch_backend: "html_requests"
   webhook_secret_env: "SCOUTBOT_WEBHOOK_SECRET"
   webhook_url_env: "SCOUTBOT_WEBHOOK_URL"
 
 discovery:
   enabled: true
   auto_queue: true
+  conf_min: 0.7
   target_links_max: 30
   max_depth: 1
   request_timeout: 10

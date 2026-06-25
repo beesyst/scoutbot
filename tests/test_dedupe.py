@@ -16,6 +16,17 @@ CATEGORIES = {
         "restaking",
     ],
     "product": ["feature", "integration", "api", "dashboard", "network", "chain"],
+    "validator_network": ["validator", "network", "node"],
+    "positioning": ["positioning", "roadmap"],
+    "hiring": ["careers", "jobs", "engineer"],
+    "legal": ["privacy", "terms", "compliance"],
+    "social": ["announcement", "community"],
+    "noise": ["©", "All rights reserved"],
+}
+
+PRIORITY_CONFIG = {
+    "high_categories": ["pricing", "delegation", "validator_network"],
+    "medium_categories": ["product", "positioning", "hiring", "legal", "social"],
 }
 
 
@@ -42,6 +53,7 @@ def test_classify_pricing() -> None:
     result = classify_signal(
         {"text": "New pricing plans available", "url": "https://example.com/pricing"},
         categories=CATEGORIES,
+        priority_config=PRIORITY_CONFIG,
     )
     assert result["category"] == "pricing"
     assert result["priority"] == "high"
@@ -51,6 +63,7 @@ def test_classify_delegation() -> None:
     result = classify_signal(
         {"text": "Validator staking update for mainnet", "url": "https://example.com"},
         categories=CATEGORIES,
+        priority_config=PRIORITY_CONFIG,
     )
     assert result["category"] == "delegation"
     assert result["priority"] == "high"
@@ -60,6 +73,7 @@ def test_classify_product() -> None:
     result = classify_signal(
         {"text": "New API integration feature", "url": "https://example.com"},
         categories=CATEGORIES,
+        priority_config=PRIORITY_CONFIG,
     )
     assert result["category"] == "product"
     assert result["priority"] == "medium"
@@ -69,6 +83,7 @@ def test_classify_social() -> None:
     result = classify_signal(
         {"text": "Some update", "url": "https://t.me/channel"},
         categories=CATEGORIES,
+        priority_config=PRIORITY_CONFIG,
     )
     assert result["category"] == "social"
     assert result["priority"] == "medium"
@@ -78,6 +93,7 @@ def test_classify_unknown() -> None:
     result = classify_signal(
         {"text": "Something happened", "url": "https://example.com"},
         categories=CATEGORIES,
+        priority_config=PRIORITY_CONFIG,
     )
     assert result["category"] == "unknown"
     assert result["priority"] == "low"

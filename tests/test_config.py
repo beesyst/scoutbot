@@ -27,6 +27,7 @@ def _write_settings(tmp_path: Path, overrides: dict | None = None) -> Path:
         "telegram": {
             "token_env": "TELEGRAM_BOT_TOKEN",
             "admin_ids_env": "TELEGRAM_ADMIN_IDS",
+            "allowed_user_ids_env": "TELEGRAM_ALLOWED_USER_IDS",
             "chat_id_env": "TELEGRAM_ALERT_CHAT_ID",
         },
         "webhook": {
@@ -39,14 +40,15 @@ def _write_settings(tmp_path: Path, overrides: dict | None = None) -> Path:
             "base_url": "http://127.0.0.1:5000",
             "api_key_env": "CHANGEDETECTION_API_KEY",
             "timeout": 20,
-            "default_interval": {"hours": 6},
-            "default_fetch_backend": "html_requests",
+            "interval": {"hours": 6},
+            "fetch_backend": "html_requests",
             "webhook_secret_env": "SCOUTBOT_WEBHOOK_SECRET",
             "webhook_url_env": "SCOUTBOT_WEBHOOK_URL",
         },
         "discovery": {
             "enabled": True,
             "auto_queue": True,
+            "conf_min": 0.7,
             "target_links_max": 30,
             "max_depth": 1,
             "request_timeout": 10,
@@ -57,12 +59,33 @@ def _write_settings(tmp_path: Path, overrides: dict | None = None) -> Path:
             "allow_private_networks": False,
         },
         "signals": {
+            "profile": "noders",
             "dedupe_enabled": True,
             "body_excerpt_chars": 1000,
             "categories": {
                 "pricing": ["pricing", "price"],
-                "delegation": ["delegation", "staking"],
                 "product": ["feature", "api"],
+                "delegation": ["delegation", "staking"],
+                "validator_network": ["validator", "network"],
+                "positioning": ["positioning"],
+                "hiring": ["careers", "jobs"],
+                "legal": ["privacy", "terms"],
+                "social": ["announcement"],
+                "noise": ["©", "All rights reserved"],
+            },
+            "priority": {
+                "high_categories": ["pricing", "delegation", "validator_network"],
+                "medium_categories": [
+                    "product",
+                    "positioning",
+                    "hiring",
+                    "legal",
+                    "social",
+                ],
+            },
+            "noise": {
+                "ignore_text": ["©", "All rights reserved"],
+                "ignore_selectors": ["nav", "footer"],
             },
         },
         "ai": {"enabled": False},
@@ -262,6 +285,7 @@ def test_missing_telegram_env_keys_fails(tmp_path: Path) -> None:
         ("storage", "db_path", "storage.db_path"),
         ("telegram", "token_env", "telegram.token_env"),
         ("telegram", "admin_ids_env", "telegram.admin_ids_env"),
+        ("telegram", "allowed_user_ids_env", "telegram.allowed_user_ids_env"),
         ("telegram", "chat_id_env", "telegram.chat_id_env"),
         ("webhook", "host", "webhook.host"),
         ("webhook", "port", "webhook.port"),
@@ -270,15 +294,12 @@ def test_missing_telegram_env_keys_fails(tmp_path: Path) -> None:
         ("changedetection", "base_url", "changedetection.base_url"),
         ("changedetection", "api_key_env", "changedetection.api_key_env"),
         ("changedetection", "timeout", "changedetection.timeout"),
-        (
-            "changedetection",
-            "default_fetch_backend",
-            "changedetection.default_fetch_backend",
-        ),
+        ("changedetection", "fetch_backend", "changedetection.fetch_backend"),
         ("changedetection", "webhook_secret_env", "changedetection.webhook_secret_env"),
         ("changedetection", "webhook_url_env", "changedetection.webhook_url_env"),
         ("discovery", "enabled", "discovery.enabled"),
         ("discovery", "auto_queue", "discovery.auto_queue"),
+        ("discovery", "conf_min", "discovery.conf_min"),
         ("discovery", "target_links_max", "discovery.target_links_max"),
         ("discovery", "max_depth", "discovery.max_depth"),
         ("discovery", "request_timeout", "discovery.request_timeout"),
@@ -312,13 +333,23 @@ def test_required_keys_have_no_hidden_defaults(
         load_settings(path)
 
 
-def test_missing_changedetection_default_interval_hours_fails(tmp_path: Path) -> None:
+def test_missing_changedetection_interval_hours_fails(tmp_path: Path) -> None:
     path = _write_settings(tmp_path)
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    del data["changedetection"]["default_interval"]["hours"]
+    del data["changedetection"]["interval"]["hours"]
     path.write_text(yaml.dump(data), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="changedetection.default_interval.hours"):
+    with pytest.raises(ValueError, match="changedetection.interval.hours"):
+        load_settings(path)
+
+
+def test_missing_discovery_conf_min_fails(tmp_path: Path) -> None:
+    path = _write_settings(tmp_path)
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    del data["discovery"]["conf_min"]
+    path.write_text(yaml.dump(data), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="discovery.conf_min"):
         load_settings(path)
 
 

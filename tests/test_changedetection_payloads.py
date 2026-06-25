@@ -60,7 +60,7 @@ def test_payload_has_required_fields() -> None:
     assert payload["processor"] == "text_json_diff"
 
 
-def test_payload_default_fetch_backend() -> None:
+def test_payload_uses_fetch_backend_field() -> None:
     payload = build_watch_payload(
         url="https://example.com",
         title="Example",
@@ -166,8 +166,8 @@ def _make_settings() -> dict:
             "webhook_url_env": "SCOUTBOT_WEBHOOK_URL",
             "webhook_secret_env": "SCOUTBOT_WEBHOOK_SECRET",
             "timeout": 20,
-            "default_interval": {"hours": 6},
-            "default_fetch_backend": "html_requests",
+            "interval": {"hours": 6},
+            "fetch_backend": "html_requests",
         }
     }
 

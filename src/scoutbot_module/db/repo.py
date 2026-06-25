@@ -14,6 +14,7 @@ from scoutbot_module.db.models import (
     Signal,
     Target,
     TargetLink,
+    TelegramSubscriber,
     Watch,
     Workspace,
 )
@@ -514,3 +515,87 @@ def export_workspace_to_yaml(
         payload={"path": str(output_path)},
     )
     return output_path
+
+
+def upsert_telegram_subscriber(
+    session: Session,
+    telegram_user_id: str,
+    chat_id: str,
+    role: str = "operator",
+    username: str | None = None,
+    first_name: str | None = None,
+) -> TelegramSubscriber:
+    stmt = select(TelegramSubscriber).where(
+        TelegramSubscriber.telegram_user_id == telegram_user_id
+    )
+    sub = session.exec(stmt).first()
+    if sub:
+        sub.chat_id = chat_id
+        sub.username = username
+        sub.first_name = first_name
+        sub.role = role
+        sub.is_active = True
+        sub.updated_at = datetime.now(UTC)
+        session.add(sub)
+        session.commit()
+        session.refresh(sub)
+        return sub
+    sub = TelegramSubscriber(
+        telegram_user_id=telegram_user_id,
+        chat_id=chat_id,
+        role=role,
+        username=username,
+        first_name=first_name,
+        is_active=True,
+    )
+    session.add(sub)
+    session.commit()
+    session.refresh(sub)
+    return sub
+
+
+def deactivate_telegram_subscriber(
+    session: Session, telegram_user_id: str
+) -> TelegramSubscriber | None:
+    stmt = select(TelegramSubscriber).where(
+        TelegramSubscriber.telegram_user_id == telegram_user_id
+    )
+    sub = session.exec(stmt).first()
+    if not sub:
+        return None
+    sub.is_active = False
+    sub.updated_at = datetime.now(UTC)
+    session.add(sub)
+    session.commit()
+    session.refresh(sub)
+    return sub
+
+
+def get_telegram_subscriber_by_user_id(
+    session: Session, telegram_user_id: str
+) -> TelegramSubscriber | None:
+    stmt = select(TelegramSubscriber).where(
+        TelegramSubscriber.telegram_user_id == telegram_user_id
+    )
+    return session.exec(stmt).first()
+
+
+def list_active_telegram_subscribers(
+    session: Session,
+) -> list[TelegramSubscriber]:
+    stmt = (
+        select(TelegramSubscriber)
+        .where(col(TelegramSubscriber.is_active))
+        .order_by(col(TelegramSubscriber.created_at))
+    )
+    return list(session.exec(stmt).all())
+
+
+def list_telegram_subscribers(
+    session: Session,
+) -> list[TelegramSubscriber]:
+    stmt = select(TelegramSubscriber).order_by(
+        col(TelegramSubscriber.is_active).desc(),
+        col(TelegramSubscriber.created_at),
+    )
+    return list(session.exec(stmt).all())

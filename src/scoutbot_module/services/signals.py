@@ -34,6 +34,11 @@ def process_webhook_event(
     if target_id and diff_hash:
         existing = find_signal_by_target_and_hash(session, target_id, diff_hash)
         if existing:
+            if existing.category == "noise":
+                LOG.info(
+                    "Noise signal suppressed: target=%s hash=%s", target_id, diff_hash
+                )
+                return {"deduped": True, "signal_id": existing.signal_id, "suppressed": True}
             LOG.info(
                 "Duplicate signal suppressed: target=%s hash=%s", target_id, diff_hash
             )
@@ -41,9 +46,33 @@ def process_webhook_event(
 
     from scoutbot_module.intelligence.classify import classify_signal
 
+    priority_config = signals_cfg.get("priority")
+    noise_cfg = signals_cfg.get("noise", {})
+    noise_ignore_text = list(noise_cfg.get("ignore_text", []))
+
+    if target_id:
+        from sqlmodel import select
+
+        from scoutbot_module.db.models import Target
+
+        tgt = session.exec(
+            select(Target).where(Target.target_id == target_id)
+        ).first()
+        if tgt and tgt.ignore_text_json:
+            import json
+
+            try:
+                extra_ignores = json.loads(tgt.ignore_text_json)
+                if isinstance(extra_ignores, list):
+                    noise_ignore_text.extend(extra_ignores)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
     classification = classify_signal(
         payload,
         categories=signals_cfg["categories"],
+        priority_config=priority_config,
+        noise_ignore_text=noise_ignore_text,
     )
 
     sig = create_signal(
@@ -124,7 +153,13 @@ def _write_webhook_artifacts(
     class_path = run_dir / "signal_classification.json"
     with class_path.open("w", encoding="utf-8") as f:
         json.dump(
-            {"signal_id": signal_id, "classification": classification},
+            {
+                "signal_id": signal_id,
+                "category": classification.get("category"),
+                "priority": classification.get("priority"),
+                "matched_keywords": classification.get("matched_keywords", []),
+                "reason_code": classification.get("reason_code", "unknown"),
+            },
             f,
             indent=2,
             ensure_ascii=False,

@@ -29,6 +29,7 @@ SUPPORTED_COMMANDS = {
     "telegram",
     "webhook",
     "routes",
+    "digest",
 }
 
 
@@ -142,6 +143,7 @@ def _run_routes(settings: dict, argv: list[str]) -> int:
     print("  ./start.sh sync")
     print("  ./start.sh telegram")
     print("  ./start.sh webhook")
+    print("  ./start.sh digest")
     print("  ./start.sh routes")
     return 0
 
@@ -184,6 +186,11 @@ def _load_handler(command: str) -> Handler:
         from scoutbot_module.web.app import run_webhook
 
         return run_webhook
+
+    if command == "digest":
+        from scoutbot_module.core.cli import run_digest
+
+        return run_digest
 
     raise ValueError(f"Unsupported command: {command}")
 
