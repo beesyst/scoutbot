@@ -17,6 +17,10 @@
 - Runtime state source of truth: SQLite
 - External engine: self-hosted `changedetection.io`
 - Source kind: тип источника (`website`, `blog`, `docs`, `rss`, `github`, `telegram`, `social_profile`, etc.)
+- Source kind resolver: функция определения типа источника по URL
+- Adapter: модуль нормализации публичного источника (`rss`, `github`, `telegram`, `link_aggregator`)
+- Backup: копия SQLite в `storage/backups/<backup_id>/` с manifest
+- Audit: диагностический отчёт о работе ScoutBot
 - Artifact: воспроизводимый runtime/debug файл в `storage/`
 - Degraded state: явное состояние частичной/неполной обработки без silent success
 
@@ -80,6 +84,9 @@ sync
 telegram
 webhook
 routes
+digest
+backup
+audit
 ```
 
 Если `./start.sh` вызван без аргументов, используется `run.mode` из `config/settings.yml`.
@@ -253,7 +260,11 @@ pricing
 careers
 rss
 github
+github_repo
+github_releases
+github_changelog
 telegram
+telegram_public
 social_profile
 link_aggregator
 custom

@@ -69,6 +69,7 @@ def _persist_discovery_result(
         link_kind = link_info.get("kind", "unknown")
         relationship = link_info.get("relationship", "unknown")
         confidence = link_info.get("confidence", None)
+        reason_code = link_info.get("reason_code") or link_info.get("source")
 
         from scoutbot_module.services.targets import store_target_link
 
@@ -80,6 +81,7 @@ def _persist_discovery_result(
             relationship=relationship,
             confidence=confidence,
             status="discovered",
+            reason_code=reason_code,
         )
         if stored["created"]:
             links_stored += 1
@@ -149,10 +151,28 @@ def _persist_discovery_result(
         degraded_sources.append(
             {
                 "url": result.get("url", ""),
+                "kind": result.get("kind", "custom"),
                 "status": degraded_status,
                 "reason_code": error,
             }
         )
+
+    for degraded in result.get("degraded", []):
+        degraded_sources.append(degraded)
+        from scoutbot_module.services.targets import store_target_link
+
+        stored = store_target_link(
+            session=session,
+            source_target_id=target_id,
+            url=degraded.get("url", result.get("url", "")),
+            kind=degraded.get("kind", "custom"),
+            relationship="degraded",
+            confidence=degraded.get("confidence"),
+            status="degraded",
+            reason_code=degraded.get("reason_code"),
+        )
+        if stored["created"]:
+            links_stored += 1
 
     _write_discovery_artifacts(
         storage_root, target_id, result, child_targets, degraded_sources
@@ -213,7 +233,7 @@ def _write_discovery_artifacts(
             "root_target": {
                 "target_id": target_id,
                 "url": source_url,
-                "kind": "website",
+                "kind": result.get("kind", "website"),
                 "status": "active",
             },
             "links": graph_links,

@@ -320,6 +320,8 @@ uv run --frozen --extra dev python config/start.py sync
 uv run --frozen --extra dev python config/start.py telegram
 uv run --frozen --extra dev python config/start.py webhook
 uv run --frozen --extra dev python config/start.py digest
+uv run --frozen --extra dev python config/start.py backup
+uv run --frozen --extra dev python config/start.py audit
 ```
 
 В обычной разработке предпочтительный entrypoint — `./start.sh`.

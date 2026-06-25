@@ -30,6 +30,8 @@ SUPPORTED_COMMANDS = {
     "webhook",
     "routes",
     "digest",
+    "backup",
+    "audit",
 }
 
 
@@ -114,6 +116,7 @@ def _prepare_dirs(settings: dict) -> None:
     (storage_root / "signals").mkdir(parents=True, exist_ok=True)
     (storage_root / "interfaces").mkdir(parents=True, exist_ok=True)
     (storage_root / "exports").mkdir(parents=True, exist_ok=True)
+    (storage_root / "backups").mkdir(parents=True, exist_ok=True)
 
 
 def _resolve_command(raw_command: str | None, settings: dict) -> str:
@@ -144,6 +147,8 @@ def _run_routes(settings: dict, argv: list[str]) -> int:
     print("  ./start.sh telegram")
     print("  ./start.sh webhook")
     print("  ./start.sh digest")
+    print("  ./start.sh backup")
+    print("  ./start.sh audit [limit]")
     print("  ./start.sh routes")
     return 0
 
@@ -192,6 +197,16 @@ def _load_handler(command: str) -> Handler:
 
         return run_digest
 
+    if command == "backup":
+        from scoutbot_module.core.cli import run_backup
+
+        return run_backup
+
+    if command == "audit":
+        from scoutbot_module.core.cli import run_audit
+
+        return run_audit
+
     raise ValueError(f"Unsupported command: {command}")
 
 
@@ -206,7 +221,7 @@ def main() -> int:
         default=None,
         help=(
             "command: doctor, init-db, import-seed, export-seed, "
-            "sync, telegram, webhook, routes. "
+            "sync, telegram, webhook, routes, digest, backup, audit. "
             "If omitted, uses run.mode from config/settings.yml."
         ),
     )

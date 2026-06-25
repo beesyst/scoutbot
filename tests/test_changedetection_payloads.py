@@ -400,3 +400,33 @@ def test_sync_removes_existing_watch_for_paused_target(
     finally:
         session.close()
         engine.dispose()
+
+
+class TestAdapterKindPayload:
+    def test_rss_kind_payload_is_normal(self) -> None:
+        payload = build_watch_payload(
+            url="https://example.com/feed.xml",
+            title="RSS Feed",
+            interval_seconds=21600,
+        )
+        assert payload["url"] == "https://example.com/feed.xml"
+        assert payload["fetch_backend"] == "html_requests"
+        assert payload["processor"] == "text_json_diff"
+
+    def test_github_repo_kind_payload_is_normal(self) -> None:
+        payload = build_watch_payload(
+            url="https://github.com/org/repo",
+            title="GitHub Repo",
+            interval_seconds=21600,
+        )
+        assert payload["url"] == "https://github.com/org/repo"
+        assert payload["fetch_backend"] == "html_requests"
+
+    def test_telegram_public_kind_payload_is_normal(self) -> None:
+        payload = build_watch_payload(
+            url="https://t.me/s/channel_name",
+            title="Telegram Channel",
+            interval_seconds=21600,
+        )
+        assert payload["url"] == "https://t.me/s/channel_name"
+        assert payload["fetch_backend"] == "html_requests"

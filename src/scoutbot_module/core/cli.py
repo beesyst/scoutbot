@@ -4,13 +4,14 @@ import asyncio
 import json
 import logging
 import os
+import sqlite3
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlmodel import Session, col
 
-from scoutbot_module.core.paths import resolve_project_path
+from scoutbot_module.core.paths import ROOT_DIR, resolve_project_path
 from scoutbot_module.db.migrations import run_migrations
 from scoutbot_module.db.repo import export_workspace_to_yaml, import_seed_yaml
 from scoutbot_module.db.session import create_db_engine, get_session
@@ -40,9 +41,15 @@ def run_doctor(settings: dict, argv: list[str]) -> int:
     telegram_env_labels = {
         "token_env": "telegram token env",
         "admin_ids_env": "telegram admin ids env",
+        "allowed_user_ids_env": "telegram allowed user ids env",
         "chat_id_env": "telegram alert chat id env",
     }
-    for key_name in ("token_env", "admin_ids_env", "chat_id_env"):
+    for key_name in (
+        "token_env",
+        "admin_ids_env",
+        "allowed_user_ids_env",
+        "chat_id_env",
+    ):
         env_key = telegram_[key_name]
         val = os.environ.get(env_key)
         if val:
@@ -400,3 +407,191 @@ async def _run_digest_async(
     )
 
     return payload
+
+
+def run_backup(settings: dict, argv: list[str]) -> int:
+    del argv
+    logger = logging.getLogger("scoutbot.backup")
+
+    db_path = resolve_project_path(settings["storage"]["db_path"])
+    storage_root = resolve_project_path(settings["storage"]["root"])
+
+    if not db_path.exists():
+        logger.error("Database file not found: %s", db_path)
+        return 1
+
+    backup_id = f"backup_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
+    backup_dir = storage_root / "backups" / backup_id
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    backup_db_path = backup_dir / "scoutbot.sqlite3"
+    with sqlite3.connect(db_path) as source:
+        with sqlite3.connect(backup_db_path) as destination:
+            source.backup(destination)
+
+    db_size = db_path.stat().st_size
+    manifest = {
+        "backup_id": backup_id,
+        "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "source_db_path": _storage_contract_path(storage_root, db_path),
+        "backup_db_path": _storage_contract_path(storage_root, backup_db_path),
+        "db_size_bytes": db_size,
+        "workspace": settings.get("workspace", {}).get("default_name", "unknown"),
+    }
+
+    manifest_path = backup_dir / "manifest.json"
+    with manifest_path.open("w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2, ensure_ascii=False)
+
+    logger.info(
+        "Backup created: %s (size=%d bytes)",
+        backup_id,
+        db_size,
+    )
+    return 0
+
+
+def run_audit(settings: dict, argv: list[str]) -> int:
+    logger = logging.getLogger("scoutbot.audit")
+
+    limit = 50
+    if argv:
+        try:
+            limit = int(argv[0].strip())
+            if limit <= 0:
+                raise ValueError
+        except ValueError, IndexError:
+            logger.warning("Invalid limit, using default 50")
+            limit = 50
+
+    db_path = resolve_project_path(settings["storage"]["db_path"])
+    storage_root = resolve_project_path(settings["storage"]["root"])
+
+    if not db_path.exists():
+        logger.error("Database file not found: %s", db_path)
+        return 1
+
+    engine = create_db_engine(db_path)
+    session = get_session(engine)
+
+    try:
+        from sqlmodel import select
+
+        from scoutbot_module.db.models import (
+            AuditLog,
+            Signal,
+            Target,
+        )
+
+        audit_stmt = (
+            select(AuditLog).order_by(col(AuditLog.created_at).desc()).limit(limit)
+        )
+        recent_actions = session.exec(audit_stmt).all()
+
+        target_stmt = (
+            select(Target).order_by(col(Target.updated_at).desc()).limit(limit)
+        )
+        target_changes = session.exec(target_stmt).all()
+
+        signals = session.exec(
+            select(Signal).order_by(col(Signal.detected_at).desc()).limit(limit)
+        ).all()
+
+        webhook_events: dict = {
+            "signals_total": 0,
+            "by_category": {},
+            "by_priority": {},
+        }
+        for sig in signals:
+            cat = sig.category or "unknown"
+            pri = sig.priority or "unknown"
+            webhook_events["signals_total"] += 1
+            webhook_events["by_category"][cat] = (
+                webhook_events["by_category"].get(cat, 0) + 1
+            )
+            webhook_events["by_priority"][pri] = (
+                webhook_events["by_priority"].get(pri, 0) + 1
+            )
+
+        sync_path = storage_root / "interfaces" / "sync_result.json"
+        sync_results: list[dict] = []
+        if sync_path.exists():
+            try:
+                sync_data = json.loads(sync_path.read_text(encoding="utf-8"))
+                sync_results.append(sync_data)
+            except json.JSONDecodeError, OSError:
+                pass
+
+        run_id = f"run_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
+        summary = {
+            "run_id": run_id,
+            "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            "limit": limit,
+            "recent_actions": [
+                {
+                    "audit_id": a.audit_id,
+                    "action": a.action,
+                    "entity_type": a.entity_type,
+                    "entity_id": a.entity_id,
+                    "created_at": a.created_at.isoformat() if a.created_at else None,
+                }
+                for a in recent_actions
+            ],
+            "target_changes": [
+                {
+                    "target_id": t.target_id,
+                    "title": t.title,
+                    "url": t.url,
+                    "kind": t.kind,
+                    "status": t.status,
+                    "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+                }
+                for t in target_changes
+            ],
+            "sync_results": sync_results,
+            "webhook_events": webhook_events,
+        }
+
+        audit_dir = storage_root / "runs" / run_id
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        audit_path = audit_dir / "audit_summary.json"
+        with audit_path.open("w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2, ensure_ascii=False)
+
+        logger.info(
+            "Audit summary: actions=%d targets=%d signals=%d",
+            len(recent_actions),
+            len(target_changes),
+            len(signals),
+        )
+        logger.info("Audit summary written: %s", audit_path)
+
+        print("ScoutBot audit summary")
+        print(f"recent_actions={len(recent_actions)}")
+        print(f"target_changes={len(target_changes)}")
+        print(f"sync_results={len(sync_results)}")
+        print(f"signals_total={webhook_events['signals_total']}")
+        print(f"by_category={webhook_events['by_category']}")
+        print(f"by_priority={webhook_events['by_priority']}")
+        print(f"audit_artifact={_display_path(audit_path)}")
+
+        return 0
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def _display_path(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(ROOT_DIR))
+    except ValueError:
+        return str(path)
+
+
+def _storage_contract_path(storage_root: Path, path: Path) -> str:
+    try:
+        return str(
+            Path(storage_root.name) / path.resolve().relative_to(storage_root.resolve())
+        )
+    except ValueError:
+        return _display_path(path)

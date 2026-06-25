@@ -176,13 +176,13 @@ Issue/branch/PR optional. Они могут использоваться поз�
 
 ## Продуктовые фазы
 
-| Фаза                                              | Статус  | Что это значит                                                                                                                 |
-| ------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| **Фаза A — Foundation + engine boundary**         | DONE    | Репозиторий, запуск, settings, logs, storage, SQLite, seed import/export, changedetection REST client/sync.                    |
-| **Фаза B — Telegram MVP**                         | PLANNED | Telegram add/list/pause/resume/delete, discovery v0, changedetection watches, webhook receiver, Telegram alerts, basic dedupe. |
-| **Фаза C — Signal quality + discovery hardening** | DONE | Noise control, categories, priority, mark-as-noise, source graph, degraded statuses, confirmation mode, digest v0.             |
-| **Фаза D — Operations and source expansion**      | PLANNED | RSS/GitHub/public Telegram/link aggregator adapters, backup/export, audit diagnostics, optional routing hooks.                 |
-| **Фаза E — Productization later**                 | FUTURE  | Web dashboard, optional AI summaries, optional n8n router, multi-workspace hardening.                                          |
+| Фаза                                              | Статус      | Что это значит                                                                                                                 |
+| ------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| **Фаза A — Foundation + engine boundary**         | DONE        | Репозиторий, запуск, settings, logs, storage, SQLite, seed import/export, changedetection REST client/sync.                    |
+| **Фаза B — Telegram MVP**                         | PLANNED     | Telegram add/list/pause/resume/delete, discovery v0, changedetection watches, webhook receiver, Telegram alerts, basic dedupe. |
+| **Фаза C — Signal quality + discovery hardening** | DONE        | Noise control, categories, priority, mark-as-noise, source graph, degraded statuses, confirmation mode, digest v0.             |
+| **Фаза D — Operations and source expansion**      | IN PROGRESS | RSS/GitHub/public Telegram/link aggregator adapters, backup/export, audit diagnostics, optional routing hooks.                 |
+| **Фаза E — Productization later**                 | FUTURE      | Web dashboard, optional AI summaries, optional n8n router, multi-workspace hardening.                                          |
 
 ## Этап 1 — MVP foundation
 
@@ -731,36 +731,76 @@ updated_at
 
 ## Этап 3 — Source expansion and operations
 
-### Итерация 3 — RSS/GitHub/public Telegram/link aggregator adapters + backup operations v0
+### Итерация 3 — Source adapters and operations v0
 
-**Статус:** PLANNED
+**Статус:** DONE
 
 #### Goal
 
-Добавить bounded adapters для стабильных публичных источников и минимальные operational tools, чтобы ScoutBot можно было безопасно использовать для разных компаний без ручного ковыряния SQLite/storage.
+Сделать ScoutBot практически пригодным для ежедневного использования: пользователь добавляет публичный URL в Telegram, ScoutBot определяет тип источника, извлекает связанные публичные источники, сохраняет source graph в SQLite/artifacts, ставит поддерживаемые targets на мониторинг через changedetection.io и даёт оператору базовые команды backup/audit/export/import без ручного доступа к SQLite/storage.
 
 #### Scope
 
 Включено:
 
-- RSS/Atom target handling;
+- normalized source kind resolver для Telegram `/add` и seed import:
+  - `website`;
+  - `blog`;
+  - `docs`;
+  - `changelog`;
+  - `pricing`;
+  - `careers`;
+  - `rss`;
+  - `github`;
+  - `github_repo`;
+  - `github_releases`;
+  - `github_changelog`;
+  - `telegram`;
+  - `telegram_public`;
+  - `link_aggregator`;
+  - `social_profile`;
+  - `custom`;
 
-- GitHub releases target handling;
+- RSS/Atom adapter:
+  - detect RSS/Atom URLs;
+  - extract feed links from HTML;
+  - normalize RSS/Atom targets into existing target/watch model;
+  - monitor feed URL through changedetection.io;
+  - explicit degraded status for invalid/unsupported feeds;
 
-- GitHub repo/changelog target handling;
+- GitHub public adapter:
+  - detect GitHub org/repo URLs;
+  - detect/derive public releases URL/feed where possible;
+  - detect public changelog candidates where possible;
+  - no GitHub API token requirement;
+  - no private repo support;
 
-- public Telegram channel webpage handling where available;
+- public Telegram adapter:
+  - accept public `t.me/<channel>` URLs;
+  - normalize monitor URL to public web form where applicable;
+  - reject/mark degraded private/invite/auth-required links;
+  - no Telegram userbot;
 
-- link aggregator parser v0:
+- link aggregator adapter v0:
   - Linktree-like pages;
   - Beacons-like pages;
-  - generic link page fallback;
+  - generic public link page fallback;
+  - extract outbound links with bounded limits;
+  - normalize and dedupe links;
+  - reject unsafe/private URLs;
+  - write adapter-specific confidence/reason codes;
 
-- normalized target kind mapping to changedetection watches;
+- source expansion behavior:
+  - adding a website can discover RSS/GitHub/Telegram/link aggregator/social links;
+  - adding a public social/link aggregator/GitHub/Telegram URL can still discover official website/docs/RSS/GitHub links where visible;
+  - discovered supported links are saved as `target_links`;
+  - allowed high-confidence links are auto-queued according to `discovery.conf_min`, `allowed_kinds` and `require_confirmation_kinds`;
+  - unsupported/private/degraded sources are stored with explicit status/reason code;
 
-- adapter-specific confidence/reason codes;
-
-- adapter-specific degraded statuses;
+- normalized target kind mapping to changedetection watches:
+  - adapter targets reuse existing `targets`, `target_links`, `watches`;
+  - changedetection.io remains the external fetch/diff engine;
+  - no custom crawler/diff-engine inside ScoutBot;
 
 - seed/import support for adapter target kinds;
 
@@ -768,39 +808,48 @@ updated_at
 
 - sync support for adapter target kinds;
 
-- workspace-scoped import/export;
+- workspace-scoped export/import:
+  - export current workspace to seed YAML;
+  - import workspace from seed YAML idempotently;
+  - conflict handling for existing workspace/project/target by stable natural keys;
+  - audit log for import/export;
 
-- explicit backup command for SQLite;
+- explicit SQLite backup command:
+  - `./start.sh backup`;
+  - copy current SQLite DB to `storage/backups/<backup_id>/scoutbot.sqlite3`;
+  - write `storage/backups/<backup_id>/manifest.json`;
 
-- export current workspace to seed YAML;
-
-- import workspace from seed YAML with conflict handling;
-
-- audit log visibility through CLI:
+- audit visibility through CLI:
+  - `./start.sh audit`;
   - recent actions;
   - target changes;
   - sync results;
-  - webhook events summary;
+  - webhook signal summary;
+  - write `storage/runs/<run_id>/audit_summary.json`;
 
-- operational diagnostics:
+- operational diagnostics in `./start.sh doctor`:
   - DB health;
   - changedetection health;
   - Telegram env health;
   - webhook URL/secret config health;
+  - source adapter config health;
 
 - optional outbound router hook:
   - n8n webhook URL as optional notification route;
   - disabled by default;
   - no state in n8n;
   - no domain logic in n8n;
+  - not required for core operation when disabled;
 
-- docs for source adapters, backup/restore/operations.
+- docs for source adapters, backup/restore/import/export/audit operations.
 
 Не включено:
 
 - GitHub API token requirement;
+- GitHub private repos;
 - Telegram userbot;
-- private channels;
+- private Telegram channels;
+- Discord monitoring;
 - X/LinkedIn/Instagram private/API scraping;
 - paid APIs;
 - browser automation written by ScoutBot;
@@ -814,17 +863,35 @@ updated_at
 
 #### Deliverable
 
-ScoutBot умеет работать с RSS/GitHub/public Telegram/link aggregators, а также может безопасно экспортироваться, бэкапиться и переноситься на другой workspace/company. n8n может быть optional router, но не становится source of truth.
+ScoutBot работает как practical operator tool:
+
+```text
+Telegram /add <public URL>
+→ source kind resolver
+→ adapter-specific discovery
+→ SQLite project/target/source graph
+→ supported child targets auto-queued by policy
+→ changedetection.io watches
+→ webhook signals
+→ Telegram alerts
+→ backup/audit/export/import available through CLI
+```
+
+Оператор может использовать ScoutBot для разных companies/workspaces без ручного редактирования SQLite/storage. n8n может быть только optional outbound router и не становится source of truth.
 
 #### Expected commands
 
 ```bash
-./start.sh backup
-./start.sh export-seed storage/exports/<workspace>.export.yml
-./start.sh import-seed config/seeds/<workspace>.yml
-./start.sh audit
+./start.sh routes
 ./start.sh doctor
+./start.sh init-db
+./start.sh import-seed config/seeds/<workspace>.yml
+./start.sh export-seed storage/exports/<workspace>.export.yml
+./start.sh backup
+./start.sh audit
 ./start.sh sync
+./start.sh telegram
+./start.sh webhook
 ```
 
 #### Artifacts
@@ -842,35 +909,42 @@ ScoutBot умеет работать с RSS/GitHub/public Telegram/link aggregat
 #### Checks
 
 - `uv run pytest -q`
-- RSS fixture tests;
+- `uv run ruff check src tests`
+- RSS/Atom fixture tests;
 - GitHub releases/changelog fixture tests;
 - public Telegram page fixture tests where applicable;
 - link aggregator fixture tests;
-- sync tests;
-- Telegram add tests;
+- source kind resolver tests;
+- sync tests for adapter target kinds;
+- Telegram `/add` tests for adapter URLs;
 - degraded source tests;
-- backup/restore smoke;
+- backup smoke;
 - export/import roundtrip;
 - audit summary smoke;
+- doctor diagnostics smoke;
 - optional n8n disabled-by-default check;
-- optional n8n webhook payload shape check if enabled;
+- optional n8n webhook payload shape check only if enabled;
 - no state written to n8n;
 - no paid API / no secret requirement check;
-- secret leakage check.
+- secret leakage check in `logs/` and `storage/`.
 
 #### DoD
 
-- adapter target kinds work through Telegram and seed import;
-- adapter output is normalized into existing target/watch model;
+- adapter target kinds work through Telegram `/add` and seed import;
+- source kind resolver maps supported public URLs predictably;
+- adapter output is normalized into existing target/link/watch model;
+- supported discovered links are saved to SQLite and source graph artifacts;
+- allowed high-confidence links are auto-queued by existing discovery policy;
 - unsupported/private/degraded cases are explicit;
-- no auth bypass or paid API dependency is introduced;
-- changedetection.io remains external fetch/diff engine;
+- no auth bypass, paid API, browser automation or private scraping is introduced;
+- changedetection.io remains the external fetch/diff engine;
 - SQLite backup is reproducible;
 - workspace export/import roundtrip works;
 - audit CLI helps inspect recent operational actions;
-- n8n remains optional routing layer only;
+- doctor reports operational health without leaking secrets;
+- n8n remains optional routing layer only and disabled by default;
 - SQLite remains runtime state source of truth;
-- config/settings.yml remains runtime/config source of truth;
+- `config/settings.yml` remains runtime/config source of truth;
 - no second source of truth is introduced.
 
 ## Этап 4 — Productization later

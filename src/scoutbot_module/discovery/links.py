@@ -6,6 +6,8 @@ from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
+from scoutbot_module.discovery.kinds import normalize_source_url, resolve_kind
+
 LOG = logging.getLogger("scoutbot.discovery.links")
 
 
@@ -35,7 +37,7 @@ def extract_links(
 
         kind, relationship, confidence = _classify_link(full_url, base_domain)
         links[full_url] = {
-            "url": full_url,
+            "url": normalize_source_url(full_url),
             "kind": kind,
             "relationship": relationship,
             "confidence": confidence,
@@ -86,11 +88,13 @@ def _classify_link(url: str, base_domain: str) -> tuple[str, str, float]:
     path = parsed.path.lower()
     same_domain = hostname == base_domain
 
-    if hostname == "github.com":
-        return "github", "social", 0.8
-
-    if hostname == "t.me" or hostname.endswith(".t.me"):
-        return "telegram", "social", 0.8
+    if hostname == "github.com" or hostname == "t.me" or hostname.endswith(".t.me"):
+        kind_info = resolve_kind(url)
+        return (
+            str(kind_info["kind"]),
+            "social",
+            float(kind_info["confidence"]),
+        )
 
     if "youtube.com" in hostname or "youtu.be" in hostname:
         return "social_profile", "social", 0.7
@@ -99,7 +103,7 @@ def _classify_link(url: str, base_domain: str) -> tuple[str, str, float]:
         return "social_profile", "social", 0.7
 
     if path.endswith((".xml", ".rss", ".atom")) or "rss" in path or "feed" in path:
-        return "rss", "rss", 0.8
+        return "rss", "rss", 0.85
 
     if "sitemap" in path and path.endswith(".xml"):
         return "website", "sitemap", 0.9

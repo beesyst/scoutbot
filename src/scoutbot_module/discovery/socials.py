@@ -6,6 +6,8 @@ from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
+from scoutbot_module.discovery.kinds import normalize_source_url, resolve_kind
+
 LOG = logging.getLogger("scoutbot.discovery.socials")
 
 
@@ -31,6 +33,8 @@ def extract_socials(html: str, base_url: str) -> list[dict[str, Any]]:
         "reddit.com": ("social_profile", "social"),
         "linktr.ee": ("link_aggregator", "link_aggregator_child"),
         "bio.link": ("link_aggregator", "link_aggregator_child"),
+        "beacons.ai": ("link_aggregator", "link_aggregator_child"),
+        "campsite.bio": ("link_aggregator", "link_aggregator_child"),
     }
 
     for tag in soup.find_all("a", href=True):
@@ -45,12 +49,21 @@ def extract_socials(html: str, base_url: str) -> list[dict[str, Any]]:
             if pattern in hostname:
                 if full_url not in seen:
                     seen.add(full_url)
+                    kind_info = resolve_kind(full_url)
                     socials.append(
                         {
-                            "url": full_url,
-                            "kind": kind,
+                            "url": normalize_source_url(full_url, kind_info),
+                            "kind": (
+                                str(kind_info["kind"])
+                                if pattern in {"github.com", "t.me"}
+                                else kind
+                            ),
                             "relationship": relationship,
-                            "confidence": 0.7,
+                            "confidence": (
+                                float(kind_info["confidence"])
+                                if pattern in {"github.com", "t.me"}
+                                else 0.7
+                            ),
                             "source": "social_link",
                         }
                     )

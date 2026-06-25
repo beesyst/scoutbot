@@ -301,6 +301,10 @@ def test_seed_import_creates_audit_log(db_session: Session, tmp_path: Path) -> N
     audit = db_session.exec(select(AuditLog)).all()
     assert len(audit) >= 1
     assert audit[0].action == "import_seed"
+    payload = yaml.safe_load(audit[0].payload_json or "{}")
+    assert payload["targets_created"] == 2
+    assert payload["targets_updated"] == 0
+    assert payload["targets_skipped"] == 0
 
 
 def test_export_writes_yaml_without_secrets(
@@ -353,3 +357,94 @@ def test_export_unknown_workspace_raises(db_session: Session, tmp_path: Path) ->
     output_path = tmp_path / "export.yml"
     with pytest.raises(ValueError, match="not found"):
         export_workspace_to_yaml(db_session, "DoesNotExist", output_path)
+
+
+def test_seed_import_with_adapter_kinds(db_session: Session, tmp_path: Path) -> None:
+    data = {
+        "workspace": {
+            "name": "AdapterTest",
+            "description": "Adapter kind import test",
+        },
+        "projects": [
+            {
+                "name": "TestProject",
+                "homepage_url": "https://example.com",
+                "tags": ["test"],
+                "targets": [
+                    {
+                        "title": "GitHub Repo",
+                        "url": "https://github.com/org/repo",
+                        "kind": "github_repo",
+                        "priority": "high",
+                    },
+                    {
+                        "title": "Telegram Channel",
+                        "url": "https://t.me/s/channel",
+                        "kind": "telegram_public",
+                        "priority": "medium",
+                    },
+                    {
+                        "title": "RSS Feed",
+                        "url": "https://example.com/feed.xml",
+                        "kind": "rss",
+                        "priority": "medium",
+                    },
+                ],
+            }
+        ],
+    }
+    seed_path = tmp_path / "adapter_seed.yml"
+    with seed_path.open("w", encoding="utf-8") as f:
+        yaml.dump(data, f)
+
+    count = import_seed_yaml(db_session, seed_path)
+    assert count == 3
+
+    kinds = {t.kind for t in db_session.exec(select(Target)).all()}
+    assert "github_repo" in kinds
+    assert "telegram_public" in kinds
+    assert "rss" in kinds
+
+    output_path = tmp_path / "adapter_export.yml"
+    export_workspace_to_yaml(db_session, "AdapterTest", output_path)
+    assert output_path.exists()
+    exported = yaml.safe_load(output_path.read_text(encoding="utf-8"))
+    exported_kinds = {t["kind"] for t in exported["projects"][0]["targets"]}
+    assert "github_repo" in exported_kinds
+    assert "telegram_public" in exported_kinds
+    assert "rss" in exported_kinds
+
+
+def test_import_roundtrip_idempotent_with_adapter_kinds(
+    db_session: Session, tmp_path: Path
+) -> None:
+    data = {
+        "workspace": {"name": "IdemTest", "description": ""},
+        "projects": [
+            {
+                "name": "P1",
+                "homepage_url": "",
+                "tags": [],
+                "targets": [
+                    {
+                        "title": "GitHub",
+                        "url": "https://github.com/org/repo",
+                        "kind": "github_repo",
+                        "priority": "high",
+                    },
+                ],
+            }
+        ],
+    }
+    seed_path = tmp_path / "idem_seed.yml"
+    with seed_path.open("w", encoding="utf-8") as f:
+        yaml.dump(data, f)
+
+    first = import_seed_yaml(db_session, seed_path)
+    assert first == 1
+
+    second = import_seed_yaml(db_session, seed_path)
+    assert second == 0
+
+    targets = db_session.exec(select(Target)).all()
+    assert len(targets) == 1

@@ -61,7 +61,7 @@ def test_extract_social_links() -> None:
     socials = extract_socials(html, "https://example.com")
     urls = {s["url"] for s in socials}
     assert "https://github.com/example" in urls
-    assert "https://t.me/example_channel" in urls
+    assert "https://t.me/s/example_channel" in urls
     assert "https://youtube.com/@example" in urls
 
 
@@ -313,3 +313,209 @@ def test_auto_queued_child_target_keeps_parent_target_id(
     ).first()
     assert child_target is not None
     assert child_target.parent_target_id == root_target.target_id
+
+
+class TestSourceKindResolver:
+    def test_resolve_website(self) -> None:
+        from scoutbot_module.discovery.kinds import resolve_kind
+
+        result = resolve_kind("https://example.com")
+        assert result["kind"] == "website"
+
+    def test_resolve_rss_by_path(self) -> None:
+        from scoutbot_module.discovery.kinds import resolve_kind
+
+        result = resolve_kind("https://example.com/feed.xml")
+        assert result["kind"] == "rss"
+
+    def test_resolve_github_org(self) -> None:
+        from scoutbot_module.discovery.kinds import resolve_kind
+
+        result = resolve_kind("https://github.com/example")
+        assert result["kind"] == "github"
+
+    def test_resolve_github_repo(self) -> None:
+        from scoutbot_module.discovery.kinds import resolve_kind
+
+        result = resolve_kind("https://github.com/example/repo")
+        assert result["kind"] == "github_repo"
+
+    def test_resolve_github_releases(self) -> None:
+        from scoutbot_module.discovery.kinds import resolve_kind
+
+        result = resolve_kind("https://github.com/example/repo/releases")
+        assert result["kind"] == "github_releases"
+
+    def test_resolve_telegram_public(self) -> None:
+        from scoutbot_module.discovery.kinds import resolve_kind
+
+        result = resolve_kind("https://t.me/example_channel")
+        assert result["kind"] == "telegram_public"
+
+    def test_resolve_telegram_invite_degraded(self) -> None:
+        from scoutbot_module.discovery.kinds import resolve_kind
+
+        result = resolve_kind("https://t.me/+abc123xyz")
+        assert result["kind"] == "telegram"
+        assert result["reason_code"] == "telegram_private_invite"
+        confidence = result["confidence"]
+        assert isinstance(confidence, float)
+        assert confidence < 0.5
+
+    def test_resolve_link_aggregator(self) -> None:
+        from scoutbot_module.discovery.kinds import resolve_kind
+
+        result = resolve_kind("https://linktr.ee/example")
+        assert result["kind"] == "link_aggregator"
+
+    def test_resolve_social_profile(self) -> None:
+        from scoutbot_module.discovery.kinds import resolve_kind
+
+        result = resolve_kind("https://x.com/example")
+        assert result["kind"] == "social_profile"
+
+    def test_github_releases_url_derivation(self) -> None:
+        from scoutbot_module.discovery.kinds import derive_github_releases_url
+
+        url = derive_github_releases_url("https://github.com/org/repo")
+        assert url == "https://github.com/org/repo/releases"
+
+    def test_github_releases_atom_derivation(self) -> None:
+        from scoutbot_module.discovery.kinds import derive_github_releases_atom
+
+        url = derive_github_releases_atom("https://github.com/org/repo")
+        assert url == "https://github.com/org/repo/releases.atom"
+
+    def test_normalize_telegram_url(self) -> None:
+        from scoutbot_module.discovery.kinds import normalize_telegram_url
+
+        url = normalize_telegram_url("https://t.me/channel_name")
+        assert url == "https://t.me/s/channel_name"
+
+
+class TestLinkAggregatorAdapter:
+    def test_extract_outbound_links(self) -> None:
+        html = """
+        <html><body>
+            <a href="https://example.com">Example</a>
+            <a href="https://github.com/example">GitHub</a>
+            <a href="https://t.me/example">Telegram</a>
+            <a href="#section">Skip</a>
+            <a href="javascript:void(0)">Skip</a>
+        </body></html>
+        """
+        from scoutbot_module.discovery.adapters import _extract_aggregator_links
+
+        links = _extract_aggregator_links(html, "https://linktr.ee/test", max_links=10)
+        urls = {link["url"] for link in links}
+        assert "https://example.com/" in urls
+        assert "https://github.com/example" in urls
+        assert "https://t.me/s/example" in urls
+        assert "#section" not in urls
+        assert "javascript:void(0)" not in urls
+
+    def test_max_links_cap(self) -> None:
+        html = (
+            "<html><body>"
+            + "".join(
+                f'<a href="https://example.com/page{i}">Link {i}</a>' for i in range(50)
+            )
+            + "</body></html>"
+        )
+        from scoutbot_module.discovery.adapters import _extract_aggregator_links
+
+        links = _extract_aggregator_links(html, "https://linktr.ee/test", max_links=5)
+        assert len(links) <= 5
+
+    def test_beacons_like_page_filters_private_links(self) -> None:
+        html = """
+        <html><body>
+            <a href="https://example.com/docs">Docs</a>
+            <a href="https://github.com/example/repo">GitHub</a>
+            <a href="http://127.0.0.1/private">Private</a>
+        </body></html>
+        """
+        from scoutbot_module.discovery.adapters import _extract_aggregator_links
+
+        links = _extract_aggregator_links(
+            html, "https://beacons.ai/example", max_links=10
+        )
+        urls = {link["url"] for link in links}
+        assert "https://example.com/docs" in urls
+        assert "https://github.com/example/repo" in urls
+        assert "http://127.0.0.1/private" not in urls
+
+
+class TestTelegramAdapter:
+    def test_private_invite_rejected(self) -> None:
+        from scoutbot_module.discovery.kinds import resolve_kind
+
+        result = resolve_kind("https://t.me/+abc123")
+        confidence = result["confidence"]
+        assert isinstance(confidence, float)
+        assert confidence < 0.5
+        assert result["reason_code"] == "telegram_private_invite"
+
+    def test_joinchat_rejected(self) -> None:
+        from scoutbot_module.discovery.kinds import resolve_kind
+
+        result = resolve_kind("https://t.me/joinchat/abc123")
+        assert result["reason_code"] == "telegram_invite_link"
+
+
+def test_run_source_adapters_detects_feed_content_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scoutbot_module.discovery.adapters import run_source_adapters
+
+    async def fake_fetch_page(**kwargs: object) -> dict[str, object]:
+        del kwargs
+        return {
+            "url": "https://example.com/feed",
+            "content_type": "application/rss+xml; charset=utf-8",
+            "html": "<rss></rss>",
+            "truncated": False,
+        }
+
+    monkeypatch.setattr(
+        "scoutbot_module.discovery.adapters.fetch_page",
+        fake_fetch_page,
+    )
+
+    result = asyncio.run(
+        run_source_adapters(
+            "https://example.com/feed",
+            {
+                "discovery": {
+                    "allow_private_networks": True,
+                    "target_links_max": 10,
+                    "request_timeout": 10,
+                    "max_response_bytes": 1000000,
+                }
+            },
+        )
+    )
+
+    assert result["kind"] == "rss"
+    assert result["links"][0]["kind"] == "rss"
+
+
+def test_run_source_adapters_marks_private_telegram_as_degraded() -> None:
+    from scoutbot_module.discovery.adapters import run_source_adapters
+
+    result = asyncio.run(
+        run_source_adapters(
+            "https://t.me/+abc123",
+            {
+                "discovery": {
+                    "allow_private_networks": True,
+                    "target_links_max": 10,
+                    "request_timeout": 10,
+                    "max_response_bytes": 1000000,
+                }
+            },
+        )
+    )
+
+    assert result["links"] == []
+    assert result["degraded"][0]["reason_code"] == "telegram_private_invite"

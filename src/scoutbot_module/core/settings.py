@@ -17,6 +17,8 @@ _SUPPORTED_MODES = frozenset(
         "webhook",
         "routes",
         "digest",
+        "backup",
+        "audit",
     }
 )
 
@@ -249,6 +251,10 @@ def load_settings(config_path: Path) -> dict[str, Any]:
         _fail("integrations.n8n: must be a mapping")
     n8n_enabled = n8n_.get("enabled")
     _check_bool(n8n_enabled, "integrations.n8n.enabled")
+    _check_env_key_name(
+        n8n_.get("webhook_url_env"),
+        "integrations.n8n.webhook_url_env",
+    )
     if n8n_enabled is not False:
         _fail("integrations.n8n.enabled: must be false in MVP baseline")
 

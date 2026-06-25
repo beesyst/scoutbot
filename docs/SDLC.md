@@ -256,6 +256,8 @@ If entrypoint behavior changed, also run the affected command:
 ./start.sh sync
 ./start.sh import-seed config/seeds/noders.yml
 ./start.sh export-seed storage/exports/noders.export.yml
+./start.sh backup
+./start.sh audit
 ```
 
 ### Artifact-related checks

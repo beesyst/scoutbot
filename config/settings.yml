@@ -56,7 +56,11 @@ discovery:
     - careers
     - rss
     - github
+    - github_repo
+    - github_releases
+    - github_changelog
     - telegram
+    - telegram_public
     - social_profile
     - link_aggregator
   require_confirmation_kinds:
@@ -162,3 +166,4 @@ ai:
 integrations:
   n8n:
     enabled: false
+    webhook_url_env: "N8N_WEBHOOK_URL"

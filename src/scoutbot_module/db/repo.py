@@ -86,6 +86,7 @@ def create_target(
         parent_target_id=parent_target_id,
         title=title,
         url=url,
+        normalized_url=url,
         kind=kind,
         priority=priority,
         status=status,
@@ -113,6 +114,7 @@ def get_or_create_target(
     tgt = session.exec(stmt).first()
     if tgt:
         tgt.title = title or tgt.title
+        tgt.normalized_url = url or tgt.normalized_url
         tgt.kind = kind or tgt.kind
         tgt.priority = priority or tgt.priority
         tgt.status = status or tgt.status
@@ -178,6 +180,7 @@ def create_target_link(
     link = TargetLink(
         source_target_id=source_target_id,
         url=url,
+        normalized_url=url,
         kind=kind,
         relationship=relationship,
         confidence=confidence,
@@ -406,7 +409,9 @@ def import_seed_yaml(session: Session, yaml_path: Path) -> int:
 
     projects_data = _require_list(data.get("projects"), "seed.projects")
 
-    total = 0
+    total_created = 0
+    total_updated = 0
+    total_skipped = 0
     for project_index, proj_item_raw in enumerate(projects_data):
         project_path = f"seed.projects[{project_index}]"
         proj_item = _require_mapping(proj_item_raw, project_path)
@@ -429,35 +434,74 @@ def import_seed_yaml(session: Session, yaml_path: Path) -> int:
         for target_index, tgt_item_raw in enumerate(targets_data):
             target_path = f"{project_path}.targets[{target_index}]"
             tgt_item = _require_mapping(tgt_item_raw, target_path)
-            _, created = get_or_create_target(
-                session,
-                proj.project_id,
-                title=_require_string(tgt_item.get("title"), f"{target_path}.title"),
-                url=_validate_http_url(tgt_item.get("url"), f"{target_path}.url"),
-                kind=_require_string(tgt_item.get("kind"), f"{target_path}.kind"),
-                priority=_require_string(
-                    tgt_item.get("priority"), f"{target_path}.priority"
-                ),
-                status=_optional_string(
-                    tgt_item.get("status"), "queued", f"{target_path}.status"
-                ),
-                fetch_backend=_optional_string(
-                    tgt_item.get("fetch_backend"),
-                    "html_requests",
-                    f"{target_path}.fetch_backend",
-                ),
+            title = _require_string(tgt_item.get("title"), f"{target_path}.title")
+            url = _validate_http_url(tgt_item.get("url"), f"{target_path}.url")
+            kind = _require_string(tgt_item.get("kind"), f"{target_path}.kind")
+            priority = _require_string(
+                tgt_item.get("priority"), f"{target_path}.priority"
             )
-            if created:
-                total += 1
+            status = _optional_string(
+                tgt_item.get("status"), "queued", f"{target_path}.status"
+            )
+            fetch_backend = _optional_string(
+                tgt_item.get("fetch_backend"),
+                "html_requests",
+                f"{target_path}.fetch_backend",
+            )
+
+            existing = session.exec(
+                select(Target)
+                .where(Target.project_id == proj.project_id)
+                .where(Target.url == url)
+            ).first()
+            if existing is None:
+                create_target(
+                    session,
+                    proj.project_id,
+                    title=title,
+                    url=url,
+                    kind=kind,
+                    priority=priority,
+                    status=status,
+                    fetch_backend=fetch_backend,
+                )
+                total_created += 1
+                continue
+
+            changed = False
+            for field, value in {
+                "title": title,
+                "normalized_url": url,
+                "kind": kind,
+                "priority": priority,
+                "status": status,
+                "fetch_backend": fetch_backend,
+            }.items():
+                if getattr(existing, field) != value:
+                    setattr(existing, field, value)
+                    changed = True
+            if changed:
+                existing.updated_at = datetime.now(UTC)
+                session.add(existing)
+                session.commit()
+                session.refresh(existing)
+                total_updated += 1
+            else:
+                total_skipped += 1
 
     write_audit_log(
         session,
         action="import_seed",
         entity_type="workspace",
         entity_id=ws.workspace_id,
-        payload={"path": str(yaml_path), "targets_created": total},
+        payload={
+            "path": str(yaml_path),
+            "targets_created": total_created,
+            "targets_updated": total_updated,
+            "targets_skipped": total_skipped,
+        },
     )
-    return total
+    return total_created
 
 
 def export_workspace_to_yaml(

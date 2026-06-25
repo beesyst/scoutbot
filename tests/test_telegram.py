@@ -553,6 +553,364 @@ def test_cmd_add_reply_includes_inline_keyboard(
     assert markup.inline_keyboard[0][0].callback_data == "target:pause:tgt_123"
 
 
+def test_cmd_add_accepts_rss_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class DummyMessage:
+        async def reply_text(self, text: str, **kwargs: object) -> None:
+            captured["text"] = text
+            captured["kwargs"] = kwargs
+
+    class DummyUser:
+        id = 123
+
+    class DummyUpdate:
+        effective_user = cast(Any, DummyUser())
+        effective_message = cast(Any, DummyMessage())
+
+    class DummySession:
+        def close(self) -> None:
+            return None
+
+    class DummyEngine:
+        def dispose(self) -> None:
+            return None
+
+    class DummySyncResult:
+        status = "ok"
+
+    class DummyContext:
+        args = ["https://example.com/feed.xml"]
+        bot_data = {
+            "allowed_user_ids": {123},
+            "settings": {
+                "workspace": {"default_name": "TEST"},
+                "discovery": {"allow_private_networks": True, "enabled": False},
+                "storage": {"root": "storage"},
+            },
+            "db_path": "sqlite://",
+        }
+
+    monkeypatch.setattr(
+        "scoutbot_module.bot.handlers.create_db_engine", lambda db_path: DummyEngine()
+    )
+    monkeypatch.setattr(
+        "scoutbot_module.bot.handlers.get_session", lambda engine: DummySession()
+    )
+
+    async def fake_run_sync(**kw):
+        return DummySyncResult()
+
+    monkeypatch.setattr("scoutbot_module.bot.handlers.run_sync", fake_run_sync)
+    monkeypatch.setattr(
+        "scoutbot_module.bot.handlers.add_target",
+        lambda **kwargs: {
+            "target_id": "tgt_rss",
+            "project_name": "TEST",
+            "title": "https://example.com/feed.xml",
+            "url": "https://example.com/feed.xml",
+            "kind": "rss",
+            "status": "queued",
+        },
+    )
+
+    asyncio.run(cmd_add(cast(Any, DummyUpdate()), cast(Any, DummyContext())))
+    assert captured["text"]
+    assert "tgt_rss" in captured["text"]
+
+
+def test_cmd_add_accepts_github_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class DummyMessage:
+        async def reply_text(self, text: str, **kwargs: object) -> None:
+            captured["text"] = text
+            captured["kwargs"] = kwargs
+
+    class DummyUser:
+        id = 123
+
+    class DummyUpdate:
+        effective_user = cast(Any, DummyUser())
+        effective_message = cast(Any, DummyMessage())
+
+    class DummySession:
+        def close(self) -> None:
+            return None
+
+    class DummyEngine:
+        def dispose(self) -> None:
+            return None
+
+    class DummySyncResult:
+        status = "ok"
+
+    class DummyContext:
+        args = ["https://github.com/example/repo"]
+        bot_data = {
+            "allowed_user_ids": {123},
+            "settings": {
+                "workspace": {"default_name": "TEST"},
+                "discovery": {"allow_private_networks": True, "enabled": False},
+                "storage": {"root": "storage"},
+            },
+            "db_path": "sqlite://",
+        }
+
+    monkeypatch.setattr(
+        "scoutbot_module.bot.handlers.create_db_engine", lambda db_path: DummyEngine()
+    )
+    monkeypatch.setattr(
+        "scoutbot_module.bot.handlers.get_session", lambda engine: DummySession()
+    )
+
+    async def fake_run_sync(**kw):
+        return DummySyncResult()
+
+    monkeypatch.setattr("scoutbot_module.bot.handlers.run_sync", fake_run_sync)
+    monkeypatch.setattr(
+        "scoutbot_module.bot.handlers.add_target",
+        lambda **kwargs: {
+            "target_id": "tgt_gh",
+            "project_name": "TEST",
+            "title": "https://github.com/example/repo",
+            "url": "https://github.com/example/repo",
+            "kind": "github_repo",
+            "status": "queued",
+        },
+    )
+
+    asyncio.run(cmd_add(cast(Any, DummyUpdate()), cast(Any, DummyContext())))
+    assert captured["text"]
+    assert "tgt_gh" in captured["text"]
+
+
+def test_cmd_add_accepts_telegram_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class DummyMessage:
+        async def reply_text(self, text: str, **kwargs: object) -> None:
+            captured["text"] = text
+            captured["kwargs"] = kwargs
+
+    class DummyUser:
+        id = 123
+
+    class DummyUpdate:
+        effective_user = cast(Any, DummyUser())
+        effective_message = cast(Any, DummyMessage())
+
+    class DummySession:
+        def close(self) -> None:
+            return None
+
+    class DummyEngine:
+        def dispose(self) -> None:
+            return None
+
+    class DummySyncResult:
+        status = "ok"
+
+    class DummyContext:
+        args = ["https://t.me/channel_name"]
+        bot_data = {
+            "allowed_user_ids": {123},
+            "settings": {
+                "workspace": {"default_name": "TEST"},
+                "discovery": {"allow_private_networks": True, "enabled": False},
+                "storage": {"root": "storage"},
+            },
+            "db_path": "sqlite://",
+        }
+
+    monkeypatch.setattr(
+        "scoutbot_module.bot.handlers.create_db_engine", lambda db_path: DummyEngine()
+    )
+    monkeypatch.setattr(
+        "scoutbot_module.bot.handlers.get_session", lambda engine: DummySession()
+    )
+
+    async def fake_run_sync(**kw):
+        return DummySyncResult()
+
+    monkeypatch.setattr("scoutbot_module.bot.handlers.run_sync", fake_run_sync)
+    monkeypatch.setattr(
+        "scoutbot_module.bot.handlers.add_target",
+        lambda **kwargs: {
+            "target_id": "tgt_tg",
+            "project_name": "TEST",
+            "title": "https://t.me/channel_name",
+            "url": "https://t.me/channel_name",
+            "kind": "telegram_public",
+            "status": "queued",
+        },
+    )
+
+    asyncio.run(cmd_add(cast(Any, DummyUpdate()), cast(Any, DummyContext())))
+    assert captured["text"]
+    assert "tgt_tg" in captured["text"]
+
+
+def test_cmd_add_accepts_link_aggregator_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class DummyMessage:
+        async def reply_text(self, text: str, **kwargs: object) -> None:
+            captured["text"] = text
+            captured["kwargs"] = kwargs
+
+    class DummyUser:
+        id = 123
+
+    class DummyUpdate:
+        effective_user = cast(Any, DummyUser())
+        effective_message = cast(Any, DummyMessage())
+
+    class DummySession:
+        def close(self) -> None:
+            return None
+
+    class DummyEngine:
+        def dispose(self) -> None:
+            return None
+
+    class DummySyncResult:
+        status = "ok"
+
+    class DummyContext:
+        args = ["https://linktr.ee/example"]
+        bot_data = {
+            "allowed_user_ids": {123},
+            "settings": {
+                "workspace": {"default_name": "TEST"},
+                "discovery": {"allow_private_networks": True, "enabled": False},
+                "storage": {"root": "storage"},
+            },
+            "db_path": "sqlite://",
+        }
+
+    monkeypatch.setattr(
+        "scoutbot_module.bot.handlers.create_db_engine", lambda db_path: DummyEngine()
+    )
+    monkeypatch.setattr(
+        "scoutbot_module.bot.handlers.get_session", lambda engine: DummySession()
+    )
+
+    async def fake_run_sync(**kw):
+        return DummySyncResult()
+
+    monkeypatch.setattr("scoutbot_module.bot.handlers.run_sync", fake_run_sync)
+    monkeypatch.setattr(
+        "scoutbot_module.bot.handlers.add_target",
+        lambda **kwargs: {
+            "target_id": "tgt_la",
+            "project_name": "TEST",
+            "title": "https://linktr.ee/example",
+            "url": "https://linktr.ee/example",
+            "kind": "link_aggregator",
+            "status": "queued",
+        },
+    )
+
+    asyncio.run(cmd_add(cast(Any, DummyUpdate()), cast(Any, DummyContext())))
+    assert captured["text"]
+    assert "tgt_la" in captured["text"]
+
+
+@pytest.mark.parametrize(
+    ("input_url", "expected_url", "expected_kind"),
+    [
+        ("https://example.com/feed.xml", "https://example.com/feed.xml", "rss"),
+        (
+            "https://github.com/example/repo",
+            "https://github.com/example/repo",
+            "github_repo",
+        ),
+        ("https://t.me/channel_name", "https://t.me/s/channel_name", "telegram_public"),
+        ("https://linktr.ee/example", "https://linktr.ee/example", "link_aggregator"),
+    ],
+)
+def test_cmd_add_passes_normalized_url_and_kind_to_add_target(
+    monkeypatch: pytest.MonkeyPatch,
+    input_url: str,
+    expected_url: str,
+    expected_kind: str,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class DummyMessage:
+        async def reply_text(self, text: str, **kwargs: object) -> None:
+            del text, kwargs
+
+    class DummyUser:
+        id = 123
+
+    class DummyUpdate:
+        effective_user = cast(Any, DummyUser())
+        effective_message = cast(Any, DummyMessage())
+
+    class DummySession:
+        def close(self) -> None:
+            return None
+
+    class DummyEngine:
+        def dispose(self) -> None:
+            return None
+
+    class DummySyncResult:
+        status = "ok"
+
+    class DummyContext:
+        args = [input_url]
+        bot_data = {
+            "allowed_user_ids": {123},
+            "settings": {
+                "workspace": {"default_name": "TEST"},
+                "discovery": {"allow_private_networks": True, "enabled": False},
+                "storage": {"root": "storage"},
+            },
+            "db_path": "sqlite://",
+        }
+
+    async def fake_run_sync(**kwargs: object) -> DummySyncResult:
+        del kwargs
+        return DummySyncResult()
+
+    monkeypatch.setattr(
+        "scoutbot_module.bot.handlers.create_db_engine", lambda db_path: DummyEngine()
+    )
+    monkeypatch.setattr(
+        "scoutbot_module.bot.handlers.get_session", lambda engine: DummySession()
+    )
+    monkeypatch.setattr("scoutbot_module.bot.handlers.run_sync", fake_run_sync)
+
+    def fake_add_target(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return {
+            "target_id": "tgt_norm",
+            "project_name": "TEST",
+            "title": str(kwargs["title"]),
+            "url": str(kwargs["url"]),
+            "kind": str(kwargs["kind"]),
+            "status": "queued",
+        }
+
+    monkeypatch.setattr("scoutbot_module.bot.handlers.add_target", fake_add_target)
+
+    asyncio.run(cmd_add(cast(Any, DummyUpdate()), cast(Any, DummyContext())))
+
+    assert captured["url"] == expected_url
+    assert captured["kind"] == expected_kind
+
+
 def test_cmd_add_uses_async_discovery_without_to_thread(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -296,8 +296,8 @@ Degraded statuses should be explicit, for example:
 
 Telegram bot supports two roles:
 
-- **admin** — полный доступ: `/add`, `/pause`, `/resume`, `/delete`, `/check`, `/subscribers`, `/projects`, `/targets`.
-- **allowed user (operator)** — может подписаться на алерты и просматривать свой статус: `/start`, `/help`, `/subscribe`, `/unsubscribe`, `/me`, `/add`, `/projects`, `/targets`, `/check`.
+- **admin** — полный доступ, включая destructive/admin-only commands: `/pause`, `/resume`, `/delete`, `/subscribers`.
+- **allowed user (operator)** — может подписаться на алерты, просматривать свой статус и использовать non-destructive monitoring commands: `/start`, `/help`, `/subscribe`, `/unsubscribe`, `/me`, `/add`, `/projects`, `/targets`, `/check`.
 
 `TELEGRAM_ADMIN_IDS` задаёт полный доступ.
 `TELEGRAM_ALLOWED_USER_IDS` задаёт allowed operators/viewers.

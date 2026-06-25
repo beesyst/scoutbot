@@ -25,6 +25,8 @@ def test_routes_command_works() -> None:
         "init-db",
         "telegram",
         "webhook",
+        "backup",
+        "audit",
     )
 
 
@@ -224,3 +226,88 @@ def test_sync_missing_api_key_reports_sqlite_targets(
     finally:
         session.close()
         engine.dispose()
+
+
+def test_backup_no_db_returns_error(tmp_path: Path) -> None:
+    from scoutbot_module.core.cli import run_backup
+
+    settings = _load_test_settings()
+    settings["storage"]["root"] = str(tmp_path / "storage")
+    settings["storage"]["db_path"] = str(
+        tmp_path / "storage" / "db" / "scoutbot.sqlite3"
+    )
+
+    exit_code = run_backup(settings, [])
+    assert exit_code == 1
+
+
+def test_backup_creates_manifest_and_db_copy(tmp_path: Path) -> None:
+    from scoutbot_module.core.cli import run_backup
+
+    db_path = tmp_path / "storage" / "db" / "scoutbot.sqlite3"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    db_path.write_text("test sqlite content", encoding="utf-8")
+
+    settings = _load_test_settings()
+    settings["storage"]["root"] = str(tmp_path / "storage")
+    settings["storage"]["db_path"] = str(db_path)
+
+    exit_code = run_backup(settings, [])
+    assert exit_code == 0
+
+    backup_dirs = list((tmp_path / "storage" / "backups").iterdir())
+    assert len(backup_dirs) == 1
+
+    backup_dir = backup_dirs[0]
+    assert (backup_dir / "scoutbot.sqlite3").exists()
+    assert (backup_dir / "manifest.json").exists()
+
+    manifest = json.loads((backup_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["backup_id"].startswith("backup_")
+    assert manifest["db_size_bytes"] > 0
+    assert manifest["source_db_path"] == "storage/db/scoutbot.sqlite3"
+    assert manifest["backup_db_path"].startswith("storage/backups/backup_")
+
+
+def test_audit_no_db_returns_error(tmp_path: Path) -> None:
+    from scoutbot_module.core.cli import run_audit
+
+    settings = _load_test_settings()
+    settings["storage"]["root"] = str(tmp_path / "storage")
+    settings["storage"]["db_path"] = str(
+        tmp_path / "storage" / "db" / "scoutbot.sqlite3"
+    )
+
+    exit_code = run_audit(settings, [])
+    assert exit_code == 1
+
+
+def test_audit_creates_summary_artifact(tmp_path: Path) -> None:
+    from scoutbot_module.core.cli import run_audit
+    from scoutbot_module.db.migrations import run_migrations
+
+    db_path = tmp_path / "storage" / "db" / "scoutbot.sqlite3"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    run_migrations(db_path)
+
+    settings = _load_test_settings()
+    settings["storage"]["root"] = str(tmp_path / "storage")
+    settings["storage"]["db_path"] = str(db_path)
+
+    exit_code = run_audit(settings, [])
+    assert exit_code == 0
+
+    run_dirs = list((tmp_path / "storage" / "runs").iterdir())
+    assert len(run_dirs) >= 1
+    latest_run = sorted(run_dirs)[-1]
+
+    audit_path = latest_run / "audit_summary.json"
+    assert audit_path.exists()
+
+    summary = json.loads(audit_path.read_text(encoding="utf-8"))
+    assert summary["run_id"].startswith("run_")
+    assert "recent_actions" in summary
+    assert "target_changes" in summary
+    assert "sync_results" in summary
+    assert "webhook_events" in summary

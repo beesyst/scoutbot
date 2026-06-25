@@ -53,7 +53,15 @@ def _write_settings(tmp_path: Path, overrides: dict | None = None) -> Path:
             "max_depth": 1,
             "request_timeout": 10,
             "max_response_bytes": 1000000,
-            "allowed_kinds": ["website", "blog"],
+            "allowed_kinds": [
+                "website",
+                "blog",
+                "rss",
+                "github_repo",
+                "github_releases",
+                "telegram_public",
+                "link_aggregator",
+            ],
             "require_confirmation_kinds": ["social_profile"],
             "blocked_domains": [],
             "allow_private_networks": False,
@@ -89,7 +97,7 @@ def _write_settings(tmp_path: Path, overrides: dict | None = None) -> Path:
             },
         },
         "ai": {"enabled": False},
-        "integrations": {"n8n": {"enabled": False}},
+        "integrations": {"n8n": {"enabled": False, "webhook_url_env": "N8N_WEBHOOK_URL"}},
     }
     if overrides:
         _deep_merge(base, overrides)
@@ -130,6 +138,14 @@ def test_settings_load_ok(tmp_path: Path) -> None:
     assert cfg["webhook"]["port"] == 8000
     assert cfg["webhook"]["path"] == "/webhooks/changedetection"
     assert cfg["webhook"]["body_bytes_max"] == 131072
+    assert cfg["integrations"]["n8n"]["webhook_url_env"] == "N8N_WEBHOOK_URL"
+
+
+def test_supported_modes_include_backup_and_audit(tmp_path: Path) -> None:
+    for mode in ("backup", "audit"):
+        path = _write_settings(tmp_path, {"run": {"mode": mode}})
+        cfg = load_settings(path)
+        assert cfg["run"]["mode"] == mode
 
 
 def test_missing_workspace_default_name_fails(tmp_path: Path) -> None:
@@ -192,6 +208,7 @@ def test_n8n_enabled_false_baseline(tmp_path: Path) -> None:
     path = _write_settings(tmp_path)
     cfg = load_settings(path)
     assert cfg["integrations"]["n8n"]["enabled"] is False
+    assert cfg["integrations"]["n8n"]["webhook_url_env"] == "N8N_WEBHOOK_URL"
 
 
 def test_n8n_enabled_true_fails(tmp_path: Path) -> None:
@@ -316,6 +333,7 @@ def test_missing_telegram_env_keys_fails(tmp_path: Path) -> None:
         ("signals", "body_excerpt_chars", "signals.body_excerpt_chars"),
         ("signals", "categories", "signals.categories"),
         ("ai", "enabled", "ai.enabled"),
+        ("integrations", "n8n", "integrations.n8n"),
     ],
 )
 def test_required_keys_have_no_hidden_defaults(
@@ -363,6 +381,16 @@ def test_missing_integrations_n8n_enabled_fails(tmp_path: Path) -> None:
         load_settings(path)
 
 
+def test_missing_integrations_n8n_webhook_url_env_fails(tmp_path: Path) -> None:
+    path = _write_settings(tmp_path)
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    del data["integrations"]["n8n"]["webhook_url_env"]
+    path.write_text(yaml.dump(data), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="integrations.n8n.webhook_url_env"):
+        load_settings(path)
+
+
 def test_missing_required_signal_category_fails(tmp_path: Path) -> None:
     path = _write_settings(tmp_path)
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -371,3 +399,17 @@ def test_missing_required_signal_category_fails(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="signals.categories.product"):
         load_settings(path)
+
+
+def test_supported_modes_are_registered() -> None:
+    from scoutbot_module.core.settings import _SUPPORTED_MODES
+
+    assert "backup" in _SUPPORTED_MODES
+    assert "audit" in _SUPPORTED_MODES
+
+
+def test_n8n_webhook_url_env_is_required(tmp_path: Path) -> None:
+    path = _write_settings(tmp_path)
+    cfg = load_settings(path)
+    n8n = cfg["integrations"]["n8n"]
+    assert n8n["webhook_url_env"] == "N8N_WEBHOOK_URL"

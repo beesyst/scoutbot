@@ -183,6 +183,9 @@ SQLite → export → storage/exports/*.yml
 ./start.sh telegram
 ./start.sh webhook
 ./start.sh routes
+./start.sh digest
+./start.sh backup
+./start.sh audit [limit]
 ```
 
 Если `./start.sh` вызван без аргументов, `config/start.py` использует:
@@ -286,11 +289,14 @@ src/scoutbot_module/
     schemas.py
 
   discovery/
-    homepage.py
+    fetch.py
     links.py
     feeds.py
     socials.py
-    link_aggregators.py
+    urls.py
+    service.py
+    kinds.py
+    adapters.py
 
   intelligence/
     classify.py

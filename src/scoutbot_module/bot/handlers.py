@@ -16,7 +16,12 @@ from scoutbot_module.bot.keyboards import build_target_actions_keyboard
 from scoutbot_module.changedetection.sync import run_sync
 from scoutbot_module.core.paths import resolve_project_path
 from scoutbot_module.db.session import create_db_engine, get_session
-from scoutbot_module.discovery.urls import normalize_url, validate_url
+from scoutbot_module.discovery.kinds import (
+    is_private_or_invite_telegram,
+    normalize_source_url,
+    resolve_kind,
+)
+from scoutbot_module.discovery.urls import validate_url
 from scoutbot_module.services.targets import add_target
 
 LOG = logging.getLogger("scoutbot.bot.handlers")
@@ -163,7 +168,14 @@ async def cmd_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     try:
         validate_url(url, allow_private_networks=allow_private)
-        url = normalize_url(url)
+        kind_info = resolve_kind(url)
+        if is_private_or_invite_telegram(kind_info):
+            await _reply(
+                update,
+                "❌ Unsupported Telegram URL: private or invite links cannot be monitored.",
+            )
+            return
+        url = normalize_source_url(url, kind_info)
     except ValueError as exc:
         await _reply(update, f"❌ Invalid URL: {exc}")
         return
@@ -178,6 +190,8 @@ async def cmd_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             url=url,
             workspace_name=workspace_name,
             actor_telegram_id=str(user.id),
+            kind=str(kind_info["kind"]),
+            title=url,
         )
 
         if discovery_cfg["enabled"]:
