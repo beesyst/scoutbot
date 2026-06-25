@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/beesyst/scoutbot/compare/scoutbot-v0.2.0...scoutbot-v0.3.0) (2026-06-25)
+
+
+### Features
+
+* **sources:** add source adapters and operations ([29b4f83](https://github.com/beesyst/scoutbot/commit/29b4f833ad6295ca1ff1de3d5de3c8d1037e2344))
+* **telegram:** add subscriptions, noise control and digest ([a4011b2](https://github.com/beesyst/scoutbot/commit/a4011b2d50fb2f0a9f29e16ae6a7a484693e84fa))
+
 ## [0.2.0](https://github.com/beesyst/scoutbot/compare/scoutbot-v0.1.0...scoutbot-v0.2.0) (2026-06-23)
 
 
